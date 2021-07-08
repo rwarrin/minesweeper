@@ -62,6 +62,17 @@ Lerp(f32 A, f32 t, f32 B)
     return(Result);
 }
 
+inline s32
+Absolute(s32 Value)
+{
+    s32 Result = Value;
+    if(Result < 0)
+    {
+        Result = -Result;
+    }
+    return(Result);
+}
+
 /**
  * V2 Operations
  **/
@@ -272,6 +283,11 @@ union v4
         v3 xyz;
         f32 _Reserved0;
     };
+    struct
+    {
+        v3 rgb;
+        f32 _Reserved1;
+    };
     f32 E[4];
 };
 
@@ -283,6 +299,46 @@ V4(f32 A, f32 B, f32 C, f32 D)
     Result.y = B;
     Result.z = C;
     Result.w = D;
+    return(Result);
+}
+
+inline v4
+V4(v3 XYZ, f32 W)
+{
+    v4 Result = {};
+    Result.x = XYZ.x;
+    Result.y = XYZ.y;
+    Result.z = XYZ.z;
+    Result.w = W;
+    return(Result);
+}
+
+inline v4
+operator +(v4 A, v4 B)
+{
+    v4 Result = {};
+    Result.x = A.x + B.x;
+    Result.y = A.y + B.y;
+    Result.z = A.z + B.z;
+    Result.w = A.w + B.w;
+    return(Result);
+}
+
+inline v4
+operator *(v4 A, f32 B)
+{
+    v4 Result = {};
+    Result.x = A.x*B;
+    Result.y = A.y*B;
+    Result.z = A.z*B;
+    Result.w = A.w*B;
+    return(Result);
+}
+
+inline v4
+operator *(f32 A, v4 B)
+{
+    v4 Result = B*A;
     return(Result);
 }
 

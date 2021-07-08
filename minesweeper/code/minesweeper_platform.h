@@ -22,6 +22,8 @@ typedef uintptr_t umm;
 #define ArrayCount(Array) (sizeof(Array) / sizeof((Array)[0]))
 
 #define Assert(Condition) do { if(!(Condition)) { *(int *)0 = 0; } }while(0);
+#define InvalidCodePath Assert(!"Invalid Code Path!");
+#define InvalidDefaultCase default: { Assert(!"Invalid Default Path"); } break
 
 #define Kilobytes(Value) ((Value)*1024LL)
 #define Megabytes(Value) (Kilobytes(Value)*1024LL)
@@ -31,6 +33,7 @@ typedef uintptr_t umm;
 #define MAX(A, B) ((A) > (B) ? A : B)
 #define MIN(A, B) ((A) < (B) ? A : B)
 
+#pragma pack(push, 1)
 struct bitmap_file
 {
     struct
@@ -54,15 +57,31 @@ struct bitmap_file
         s32 YPelsPerMeter;
         u32 ColorsUsed;
         u32 ColorsImportant;
-    } InfoHeader;
-    u8 *Data;
-};
 
+        u32 RedMask;
+        u32 GreenMask;
+        u32 BlueMask;
+        u32 AlphaMask;
+    } InfoHeader;
+};
+#pragma pack(pop)
+
+struct color_mask
+{
+    u32 Mask;
+    u32 ShiftAmount;
+};
 struct bitmap
 {
     u32 Width;
     u32 Height;
     u32 Pitch;
+
+    color_mask RedMask;
+    color_mask GreenMask;
+    color_mask BlueMask;
+    color_mask AlphaMask;
+
     u8 *Data;
 };
 
@@ -109,8 +128,31 @@ struct input
     };
 };
 
+struct file_result
+{
+    void *Contents;
+    u32 FileSize;
+};
+#define PLATFORM_READ_FILE(name) file_result name(char* FileName)
+typedef PLATFORM_READ_FILE(platform_read_file);
+
+#define PLATFORM_FREE_MEMORY(name) void name(void *Memory)
+typedef PLATFORM_FREE_MEMORY(platform_free_memory);
+
+#define PLATFORM_GET_MS_ELAPSED64(name) u64 name(void)
+typedef PLATFORM_GET_MS_ELAPSED64(platform_get_ms_elapsed64);
+
+struct platform_api
+{
+    platform_read_file *ReadFile;
+    platform_free_memory *FreeMemory;
+    platform_get_ms_elapsed64 *GetMSElapsed64;
+};
+
 struct app_memory
 {
+    platform_api PlatformAPI;
+
     u32 PermanentStorageSize;
     void *PermanentStorage;
 

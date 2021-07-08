@@ -9,7 +9,7 @@ struct memory_arena
     s32 TempCount;
 };
 
-struct temp_arena
+struct temporary_memory
 {
     memory_arena *Arena;
     mem_size Used;
@@ -44,10 +44,10 @@ PushSize_(memory_arena *Arena, u32 Size)
     return(Result);
 }
 
-inline temp_arena
-BeginTemporaryArena(memory_arena *Arena)
+inline temporary_memory
+BeginTemporaryMemory(memory_arena *Arena)
 {
-    temp_arena Result = {};
+    temporary_memory Result = {};
 
     ++Arena->TempCount;
     Result.Arena = Arena;
@@ -57,13 +57,30 @@ BeginTemporaryArena(memory_arena *Arena)
 }
 
 inline void
-EndTemporaryMemory(temp_arena TempArena)
+EndTemporaryMemory(temporary_memory TempArena)
 {
     memory_arena *Arena = TempArena.Arena;
     Assert(Arena->Used >= TempArena.Used);
     Arena->Used = TempArena.Used;
     Assert(Arena->TempCount > 0);
     --Arena->TempCount;
+}
+
+inline void
+CheckArena(memory_arena *Arena)
+{
+    Assert(Arena->TempCount == 0);
+}
+
+inline void
+Copy(void *Dest, void *Src, u32 Size)
+{
+    u8 *DestPtr = (u8 *)Dest;
+    u8 *SrcPtr = (u8 *)Src;
+    while(Size--)
+    {
+        *DestPtr++ = *SrcPtr++;
+    }
 }
 
 #define MINESWEEPER_MEMORY_H

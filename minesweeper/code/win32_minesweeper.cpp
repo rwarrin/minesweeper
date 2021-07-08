@@ -108,6 +108,56 @@ Win32DisplayBufferInWindow(win32_back_buffer *BackBuffer, HDC DeviceContext)
                   DIB_RGB_COLORS, SRCCOPY);
 }
 
+static
+PLATFORM_FREE_MEMORY(Win32FreeMemory)
+{
+    if(Memory)
+    {
+        VirtualFree(Memory, 0, MEM_RELEASE);
+    }
+}
+
+static
+PLATFORM_READ_FILE(Win32ReadFile)
+{
+    file_result Result = {};
+
+    HANDLE FileHandle = CreateFileA(FileName, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+    if(FileHandle != INVALID_HANDLE_VALUE)
+    {
+        LARGE_INTEGER FileSize = {};
+        if(GetFileSizeEx(FileHandle, &FileSize))
+        {
+            u32 Size = (u32)FileSize.LowPart;
+            Result.Contents = VirtualAlloc(0, Size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+            if(Result.Contents)
+            {
+                DWORD BytesRead = 0;
+                if(ReadFile(FileHandle, Result.Contents, Size, &BytesRead, 0) && (Size == BytesRead))
+                {
+                    Result.FileSize = Size;
+                }
+                else
+                {
+                    Win32FreeMemory(Result.Contents);
+                    Result.Contents = 0;
+                }
+            }
+        }
+
+        CloseHandle(FileHandle);
+    }
+
+    return(Result);
+}
+
+static
+PLATFORM_GET_MS_ELAPSED64(Win32GetMSElapsed64)
+{
+    u64 Result = GetTickCount64();
+    return(Result);
+}
+
 static void
 ProcessPendingMessages(input *Input)
 {
@@ -235,6 +285,10 @@ WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
     Input.dt = dt;
 
     app_memory AppMemory = {};
+    AppMemory.PlatformAPI.ReadFile = Win32ReadFile;
+    AppMemory.PlatformAPI.FreeMemory = Win32FreeMemory;
+    AppMemory.PlatformAPI.GetMSElapsed64 = Win32GetMSElapsed64;
+
     AppMemory.PermanentStorageSize = Megabytes(10);
     AppMemory.PermanentStorage = VirtualAlloc((void *)Terabytes(2), AppMemory.PermanentStorageSize,
                                               MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
@@ -313,9 +367,9 @@ WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
 #if 1
         {
             LARGE_INTEGER FinalTime; QueryPerformanceCounter(&FinalTime);
-            f32 MSElapsed = ((f32)(FinalTime.QuadPart - LastTime.QuadPart) / (f32)(CPUFrequency.QuadPart)) * 1000.0f;
-            f32 FPS = 1000.0f / MSElapsed;
-            DebugWriteLine("FPS: %.2f\n", FPS);
+            f32 TotalMSElapsed = ((f32)(FinalTime.QuadPart - LastTime.QuadPart) / (f32)(CPUFrequency.QuadPart)) * 1000.0f;
+            f32 FPS = 1000.0f / TotalMSElapsed;
+            DebugWriteLine("%02.2f FPS (%02.2f ms/f)\n", FPS, MSElapsed);
 
             QueryPerformanceCounter(&LastTime);
         }
