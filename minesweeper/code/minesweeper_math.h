@@ -73,6 +73,13 @@ Absolute(s32 Value)
     return(Result);
 }
 
+inline f32
+Ceil(f32 Value)
+{
+    f32 Result = ceil(Value);
+    return(Result);
+}
+
 /**
  * V2 Operations
  **/

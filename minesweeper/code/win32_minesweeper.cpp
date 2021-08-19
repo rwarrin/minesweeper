@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <intrin.h>
 #include <stdio.h>
 
 #include "minesweeper_platform.h"
@@ -93,7 +94,7 @@ Win32ResizeDIBSection(win32_back_buffer *BackBuffer, u32 Width, u32 Height)
     BackBuffer->Bitmap.Height = Height;
     BackBuffer->Bitmap.Pitch = Width*BYTES_PER_PIXEL;
 
-    u32 MemorySize = Width*Height*BYTES_PER_PIXEL;
+    u32 MemorySize = (Width*Height*BYTES_PER_PIXEL) + 1;
     BackBuffer->Bitmap.Data = (u8 *)VirtualAlloc(0, MemorySize, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
     Assert(BackBuffer->Bitmap.Data);
 }
@@ -158,6 +159,101 @@ PLATFORM_GET_MS_ELAPSED64(Win32GetMSElapsed64)
     return(Result);
 }
 
+static
+PLATFORM_WRITE_FILE(Win32WriteFile)
+{
+    b32 Result = false;
+
+    HANDLE FileHandle = CreateFileA(FileName, FILE_APPEND_DATA, 0, 0, OPEN_ALWAYS, 0, 0);
+    if(FileHandle != INVALID_HANDLE_VALUE)
+    {
+        DWORD NumBytesWritten = 0;
+        if(WriteFile(FileHandle, Data, DataLength, &NumBytesWritten, 0))
+        {
+            Result = true;
+            if(BytesWritten)
+            {
+                *BytesWritten = NumBytesWritten;
+            }
+        }
+
+        CloseHandle(FileHandle);
+    }
+
+    if(!Result && BytesWritten)
+    {
+        *BytesWritten = 0;
+    }
+
+    return(Result);
+}
+
+static
+PLATFORM_GET_DATETIME(Win32GetDateTime)
+{
+    platform_datetime_result Result = {};
+
+    SYSTEMTIME LocalTime;
+    GetLocalTime(&LocalTime);
+
+    Result.Year = LocalTime.wYear;
+    Result.Month = LocalTime.wMonth;
+    Result.Day = LocalTime.wDay;
+    Result.Hour = LocalTime.wHour;
+    Result.Minute = LocalTime.wMinute;
+    Result.Second = LocalTime.wSecond;
+
+    return(Result);
+}
+
+static
+PLATFORM_REQUEST_EXIT(RequestExit)
+{
+    GlobalRunning = false;
+    PostQuitMessage(0);
+}
+
+static
+PLATFORM_ENUMERATE_FILES(Win32EnumerateFiles)
+{
+    platform_file_enumeration_result *Result =
+        (platform_file_enumeration_result *)VirtualAlloc(0, sizeof(*Result), MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+
+    platform_file_enumeration_result *CurrentBucket = Result;
+    WIN32_FIND_DATA FindData = {};
+    HANDLE FindFileHandle = FindFirstFileA(Pattern, &FindData);
+    if(FindFileHandle != INVALID_HANDLE_VALUE)
+    {
+        do
+        {
+            if((CurrentBucket->Used + 1) > ArrayCount(CurrentBucket->Items))
+            {
+                platform_file_enumeration_result *NewBucket =
+                    (platform_file_enumeration_result *)VirtualAlloc(0, sizeof(*Result), MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+                NewBucket->Prev = CurrentBucket;
+                CurrentBucket->Next = NewBucket;
+                CurrentBucket = NewBucket;
+            }
+
+            // TODO(rick): Replace strlen
+            CopyMemory(CurrentBucket->Items[CurrentBucket->Used++],
+                       FindData.cFileName, strlen(FindData.cFileName));
+        } while(FindNextFileA(FindFileHandle, &FindData));
+    }
+
+    return(Result);
+}
+
+static
+PLATFORM_FREE_ENUMERATED_FILE_RESULT(Win32FreeEnumeratedFileResult)
+{
+    while(Data)
+    {
+        Data = Data->Next;
+        VirtualFree(Data, 0, MEM_RELEASE);
+    }
+}
+
 static void
 ProcessPendingMessages(input *Input)
 {
@@ -185,7 +281,7 @@ ProcessPendingMessages(input *Input)
                 {
                     if(KeyCode == VK_ESCAPE)
                     {
-                        GlobalRunning = false;
+                        Win32ProcessKeyboardInput(&Input->Keyboard_Escape, IsDown);
                     }
                     else if(KeyCode == 'A')
                     {
@@ -195,6 +291,10 @@ ProcessPendingMessages(input *Input)
                     {
                         Win32ProcessKeyboardInput(&Input->Keyboard_D, IsDown);
                     }
+                    else if(KeyCode == 'N')
+                    {
+                        Win32ProcessKeyboardInput(&Input->Keyboard_N, IsDown);
+                    }
                     else if(KeyCode == 'S')
                     {
                         Win32ProcessKeyboardInput(&Input->Keyboard_S, IsDown);
@@ -202,6 +302,22 @@ ProcessPendingMessages(input *Input)
                     else if(KeyCode == 'W')
                     {
                         Win32ProcessKeyboardInput(&Input->Keyboard_W, IsDown);
+                    }
+                    else if(KeyCode == 'X')
+                    {
+                        Win32ProcessKeyboardInput(&Input->Keyboard_X, IsDown);
+                    }
+                    else if(KeyCode == 'Z')
+                    {
+                        Win32ProcessKeyboardInput(&Input->Keyboard_Z, IsDown);
+                    }
+                    else if(KeyCode == VK_SPACE)
+                    {
+                        Win32ProcessKeyboardInput(&Input->Keyboard_Space, IsDown);
+                    }
+                    else if(KeyCode == VK_RETURN)
+                    {
+                        Win32ProcessKeyboardInput(&Input->Keyboard_Return, IsDown);
                     }
                 }
             } break;
@@ -239,9 +355,120 @@ Win32WindowsCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
     return(Result);
 }
 
+struct win32_thread_info
+{
+    u32 ID;
+};
+
+struct work_queue_entry
+{
+    platform_work_callback *Proc;
+    void *Data;
+};
+
+struct platform_work_queue
+{
+    u32 volatile EntryCount;
+    u32 volatile NextEntryToDo;
+    u32 volatile EntryCompletionCount;
+    HANDLE SemaphoreHandle;
+    work_queue_entry Entries[256];
+};
+
+static PLATFORM_ADD_WORK_TO_QUEUE(Win32AddWorkToQueue)
+{
+    Assert(WorkQueue->EntryCount < ArrayCount(WorkQueue->Entries));
+
+    work_queue_entry *Entry = WorkQueue->Entries + WorkQueue->EntryCount;
+    Entry->Proc = Proc;
+    Entry->Data = Data;
+
+    WriteBarrier;
+    ++WorkQueue->EntryCount;
+    ReleaseSemaphore(WorkQueue->SemaphoreHandle, 1, 0);
+}
+
+inline b32
+DoWorkerWork(platform_work_queue *WorkQueue)
+{
+    b32 DidWork = false;
+
+    u32 OriginalNextEntryToDo = WorkQueue->NextEntryToDo;
+    if(WorkQueue->NextEntryToDo < WorkQueue->EntryCount)
+    {
+        u32 EntryIndex = InterlockedCompareExchange((LONG volatile *)&WorkQueue->NextEntryToDo,
+                                                    OriginalNextEntryToDo + 1,
+                                                    OriginalNextEntryToDo);
+        if(EntryIndex == OriginalNextEntryToDo)
+        {
+            ReadBarrier;
+            work_queue_entry *Entry = WorkQueue->Entries + EntryIndex;
+            Entry->Proc(Entry->Data);
+
+            InterlockedIncrement((LONG volatile *)&WorkQueue->EntryCompletionCount);
+            DidWork = true;
+        }
+    }
+
+    return(DidWork);
+}
+
+static void
+ClearWorkQueue(platform_work_queue *WorkQueue)
+{
+    WorkQueue->EntryCount = 0;
+    WorkQueue->EntryCompletionCount = 0;
+    WorkQueue->NextEntryToDo = 0;
+}
+
+static PLATFORM_COMPLETE_ALL_WORK(Win32CompleteAllWorkQueueWork)
+{
+    while(WorkQueue->EntryCompletionCount < WorkQueue->EntryCount)
+    {
+        DoWorkerWork(WorkQueue);
+    }
+
+    ClearWorkQueue(WorkQueue);
+}
+
+DWORD
+ThreadProc(void *Data)
+{
+    platform_work_queue *WorkQueue = (platform_work_queue *)Data;
+
+    for(;;)
+    {
+        if(!DoWorkerWork(WorkQueue))
+        {
+            WaitForSingleObjectEx(WorkQueue->SemaphoreHandle, INFINITE, FALSE);
+        }
+    }
+
+    return(0);
+}
+
+static void
+StringWorkProc(void *Data)
+{
+    char *String = (char *)Data;
+    OutputDebugStringA(String);
+}
+
 int
 WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
 {
+    u32 InitialCount = 0;
+    u32 ThreadCount = 11;
+    HANDLE SemaphoreHandle = CreateSemaphoreEx(0, InitialCount, ThreadCount, 0, 0, SEMAPHORE_ALL_ACCESS);
+    platform_work_queue WorkQueue = {};
+    WorkQueue.SemaphoreHandle = SemaphoreHandle;
+
+    for(u32 ThreadIndex = 0; ThreadIndex < ThreadCount; ++ThreadIndex)
+    {
+        HANDLE ThreadHandle = CreateThread(0, 0, ThreadProc, &WorkQueue, 0, 0);
+        CloseHandle(ThreadHandle);
+    }
+
     WNDCLASSEXA WindowClass = {};
     WindowClass.cbSize = sizeof(WindowClass);
     WindowClass.style = CS_HREDRAW | CS_VREDRAW;
@@ -288,6 +515,14 @@ WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
     AppMemory.PlatformAPI.ReadFile = Win32ReadFile;
     AppMemory.PlatformAPI.FreeMemory = Win32FreeMemory;
     AppMemory.PlatformAPI.GetMSElapsed64 = Win32GetMSElapsed64;
+    AppMemory.PlatformAPI.WriteFile = Win32WriteFile;
+    AppMemory.PlatformAPI.GetDateTime = Win32GetDateTime;
+    AppMemory.PlatformAPI.RequestExit = RequestExit;
+    AppMemory.PlatformAPI.EnumerateFiles = Win32EnumerateFiles;
+    AppMemory.PlatformAPI.FreeEnumeratedFileResult = Win32FreeEnumeratedFileResult;
+    AppMemory.PlatformAPI.AddWorkToQueue = Win32AddWorkToQueue;
+    AppMemory.PlatformAPI.CompleteAllWork = Win32CompleteAllWorkQueueWork;
+    AppMemory.PlatformAPI.WorkQueue = &WorkQueue;
 
     AppMemory.PermanentStorageSize = Megabytes(10);
     AppMemory.PermanentStorage = VirtualAlloc((void *)Terabytes(2), AppMemory.PermanentStorageSize,
@@ -369,7 +604,8 @@ WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
             LARGE_INTEGER FinalTime; QueryPerformanceCounter(&FinalTime);
             f32 TotalMSElapsed = ((f32)(FinalTime.QuadPart - LastTime.QuadPart) / (f32)(CPUFrequency.QuadPart)) * 1000.0f;
             f32 FPS = 1000.0f / TotalMSElapsed;
-            DebugWriteLine("%02.2f FPS (%02.2f ms/f)\n", FPS, MSElapsed);
+            AppMemory.PlatformAPI.FPS = FPS;
+            //DebugWriteLine("%02.2f FPS (%02.2f ms/f %0dms slept)\n", FPS, MSElapsed, MSToSleep > 0 ? MSToSleep : 0);
 
             QueryPerformanceCounter(&LastTime);
         }

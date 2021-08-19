@@ -46,5 +46,14 @@ struct render_group
     u32 PushBufferSize;
 };
 
+struct tiled_render_work
+{
+    render_group *RenderGroup;
+    bitmap *DrawBuffer;
+    rect2 ClipRect;
+};
+
+void PushBitmap(render_group *RenderGroup, bitmap *Bitmap, v2 P, v4 Color);
+
 #define MINESWEEPER_RENDER_GROUP
 #endif

@@ -83,5 +83,44 @@ Copy(void *Dest, void *Src, u32 Size)
     }
 }
 
+inline void
+ZeroMemory(void *Mem, u32 Size)
+{
+    u8 *Ptr = (u8 *)Mem;
+    while(Size--)
+    {
+        *Ptr++ = 0;
+    }
+}
+
+inline char
+ScanTo(char **Stream, char Target)
+{
+    char *At = *Stream;
+    while((At[0] != 0) && At[0] != Target)
+    {
+        ++At;
+    }
+
+    *Stream = At;
+    return(*At);
+}
+
+inline s32
+StringCompare(char *This, char *To)
+{
+    while(*This == *To)
+    {
+        if(*This == 0)
+        {
+            return 0;
+        }
+
+        ++This, ++To;
+    }
+
+    return(*This - *To);
+}
+
 #define MINESWEEPER_MEMORY_H
 #endif

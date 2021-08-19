@@ -33,6 +33,10 @@ typedef uintptr_t umm;
 #define MAX(A, B) ((A) > (B) ? A : B)
 #define MIN(A, B) ((A) < (B) ? A : B)
 
+#define WriteBarrier _WriteBarrier(); _mm_sfence()
+#define ReadBarrier _ReadBarrier(); _mm_lfence()
+#define ReadWriteBarrier _ReadWriteBarrier(); _mm_mfence()
+
 #pragma pack(push, 1)
 struct bitmap_file
 {
@@ -95,6 +99,8 @@ struct input
 {
     f32 dt;
 
+    // TODO(rick): Rename these into generic action/control names and let the
+    // platform decide how to assign HID inputs to actions and controls.
     s32 MouseX;
     s32 MouseY;
     s32 MouseZ;
@@ -120,8 +126,15 @@ struct input
         {
             button_state Keyboard_A;
             button_state Keyboard_D;
+            button_state Keyboard_N;
             button_state Keyboard_S;
             button_state Keyboard_W;
+            button_state Keyboard_X;
+            button_state Keyboard_Z;
+
+            button_state Keyboard_Escape;
+            button_state Keyboard_Return;
+            button_state Keyboard_Space;
 
             button_state Keyboard_DoNotUse;
         };
@@ -142,13 +155,64 @@ typedef PLATFORM_FREE_MEMORY(platform_free_memory);
 #define PLATFORM_GET_MS_ELAPSED64(name) u64 name(void)
 typedef PLATFORM_GET_MS_ELAPSED64(platform_get_ms_elapsed64);
 
+#define PLATFORM_WRITE_FILE(name) b32 name(char *FileName, void *Data, u32 DataLength, u32 *BytesWritten)
+typedef PLATFORM_WRITE_FILE(platform_write_file);
+
+struct platform_datetime_result
+{
+    s16 Year;
+    s16 Month;
+    s16 Day;
+    s16 Hour;
+    s16 Minute;
+    s16 Second;
+};
+#define PLATFORM_GET_DATETIME(name) platform_datetime_result name(void)
+typedef PLATFORM_GET_DATETIME(platform_get_datetime);
+
+#define PLATFORM_REQUEST_EXIT(name) void name(void)
+typedef PLATFORM_REQUEST_EXIT(platform_request_exit);
+
+struct platform_file_enumeration_result
+{
+    u32 Used;
+    char Items[16][32];
+    platform_file_enumeration_result *Prev;
+    platform_file_enumeration_result *Next;
+};
+#define PLATFORM_ENUMERATE_FILES(name) platform_file_enumeration_result * name(char *Pattern)
+typedef PLATFORM_ENUMERATE_FILES(platform_enumerate_files);
+#define PLATFORM_FREE_ENUMERATED_FILE_RESULT(name) void name(platform_file_enumeration_result *Data)
+typedef PLATFORM_FREE_ENUMERATED_FILE_RESULT(platform_free_enumerated_file_result);
+
+struct platform_work_queue;
+#define PLATFORM_WORK_CALLBACK(name) void name(void *Data)
+typedef PLATFORM_WORK_CALLBACK(platform_work_callback);
+
+#define PLATFORM_ADD_WORK_TO_QUEUE(name) void name(platform_work_queue *WorkQueue, platform_work_callback *Proc, void *Data)
+typedef PLATFORM_ADD_WORK_TO_QUEUE(platform_add_work_to_queue);
+#define PLATFORM_COMPLETE_ALL_WORK(name) void name(platform_work_queue *WorkQueue)
+typedef PLATFORM_COMPLETE_ALL_WORK(platform_complete_all_work);
+
 struct platform_api
 {
     platform_read_file *ReadFile;
     platform_free_memory *FreeMemory;
     platform_get_ms_elapsed64 *GetMSElapsed64;
+    platform_write_file *WriteFile;
+    platform_get_datetime *GetDateTime;
+    platform_request_exit *RequestExit;
+    platform_enumerate_files *EnumerateFiles;
+    platform_free_enumerated_file_result *FreeEnumeratedFileResult;
+    platform_add_work_to_queue *AddWorkToQueue;
+    platform_complete_all_work *CompleteAllWork;
+
+    platform_work_queue *WorkQueue;
+
+    f32 FPS;
 };
 
+#pragma pack(push, 1)
 struct app_memory
 {
     platform_api PlatformAPI;
@@ -162,6 +226,7 @@ struct app_memory
     u32 FrameStorageSize;
     void *FrameStorage;
 };
+#pragma pack(pop)
 
 #define WasDown(Key) ((Key.IsDown == 0) && (Key.TransitionCount != 0))
 #define IsDown(Key) (Key.IsDown)

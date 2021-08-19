@@ -1,5 +1,8 @@
 #ifndef MINESWEEPER_INTRINSICS_H
 
+#include <intrin.h>
+#include <math.h>
+
 inline u32
 BitScanForward(u32 Value)
 {
@@ -28,6 +31,20 @@ inline u64
 ReadCPUFrequency()
 {
     u64 Result = *(u64 *)0x7ffe0300;
+    return(Result);
+}
+
+inline f32
+Sin(f32 Value)
+{
+    f32 Result = sinf(Value);
+    return(Result);
+}
+
+inline f32
+Cos(f32 Value)
+{
+    f32 Result = sinf(Value);
     return(Result);
 }
 

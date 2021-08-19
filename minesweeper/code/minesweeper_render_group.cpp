@@ -10,57 +10,6 @@ AllocateRenderGroup(memory_arena *Arena, u32 MaxPushBufferSize)
     return(Result);
 }
 
-static void
-RenderGroupToOutput(render_group *RenderGroup, bitmap *DrawBuffer)
-{
-    for(u32 BaseAddress = 0;
-        BaseAddress < RenderGroup->PushBufferSize;
-       )
-    {
-        render_entry_header *Header = (render_entry_header *)(RenderGroup->PushBufferBase + BaseAddress);
-        BaseAddress += sizeof(*Header);
-
-        void *Data = (u8 *)Header + sizeof(*Header);
-        switch(Header->Type)
-        {
-            case RenderEntryType_render_entry_clear:
-            {
-                render_entry_clear *Entry = (render_entry_clear *)Data;
-
-                Clear(DrawBuffer, Entry->Color);
-
-                BaseAddress += sizeof(*Entry);
-            } break;
-            case RenderEntryType_render_entry_rectangle:
-            {
-                render_entry_rectangle *Entry = (render_entry_rectangle *)Data;
-
-                DrawRectangle(DrawBuffer, Entry->Min, Entry->Max, Entry->Color);
-
-                BaseAddress += sizeof(*Entry);
-            } break;
-            case RenderEntryType_render_entry_rectangle_outline:
-            {
-                render_entry_rectangle_outline *Entry = (render_entry_rectangle_outline *)Data;
-
-                DrawRectangleOutline(DrawBuffer, Entry->Rect, Entry->Color, Entry->Thickness);
-
-                BaseAddress += sizeof(*Entry);
-            } break;
-            case RenderEntryType_render_entry_bitmap:
-            {
-                render_entry_bitmap *Entry = (render_entry_bitmap *)Data;
-
-                DrawBitmap(DrawBuffer, &Entry->Bitmap, Entry->P.x, Entry->P.y, Entry->Color);
-
-                BaseAddress += sizeof(*Entry);
-            } break;
-
-            InvalidDefaultCase;
-        }
-    }
-}
-
 #define PushRenderElement(Group, type) (type *)PushRenderElement_(Group, sizeof(type), RenderEntryType_##type)
 static void *
 PushRenderElement_(render_group *RenderGroup, u32 Size, render_entry_type Type)
@@ -137,3 +86,117 @@ PushBitmap(render_group *RenderGroup, bitmap *Bitmap, v2 P, v4 Color = V4(1, 1, 
         Entry->Color = Color;
     }
 }
+
+static void
+RenderGroupToOutput(render_group *RenderGroup, bitmap *DrawBuffer, rect2 ClipRect)
+{
+    // TODO(rick): Add rectangle2 parameter that is the cliprect
+    // pass cliprect to each of the draw functions
+    // update draw functions to set draw bounds from cliprect
+    for(u32 BaseAddress = 0;
+        BaseAddress < RenderGroup->PushBufferSize;
+       )
+    {
+        render_entry_header *Header = (render_entry_header *)(RenderGroup->PushBufferBase + BaseAddress);
+        BaseAddress += sizeof(*Header);
+
+        void *Data = (u8 *)Header + sizeof(*Header);
+        switch(Header->Type)
+        {
+            case RenderEntryType_render_entry_clear:
+            {
+                render_entry_clear *Entry = (render_entry_clear *)Data;
+
+                ClearSIMD(DrawBuffer, Entry->Color, ClipRect);
+                //Clear(DrawBuffer, Entry->Color, ClipRect);
+                //DrawRectangleSIMD4W(DrawBuffer,
+                //                    V2(0, 0),
+                //                    V2((f32)DrawBuffer->Width, (f32)DrawBuffer->Height),
+                //                    Entry->Color, ClipRect);
+
+                BaseAddress += sizeof(*Entry);
+            } break;
+            case RenderEntryType_render_entry_rectangle:
+            {
+                render_entry_rectangle *Entry = (render_entry_rectangle *)Data;
+
+                //DrawRectangle(DrawBuffer, Entry->Min, Entry->Max, Entry->Color, ClipRect);
+                //DrawRectangleSIMDRGBA(DrawBuffer, Entry->Min, Entry->Max, Entry->Color, ClipRect);
+                DrawRectangleSIMD4W(DrawBuffer, Entry->Min, Entry->Max, Entry->Color, ClipRect);
+
+                BaseAddress += sizeof(*Entry);
+            } break;
+            case RenderEntryType_render_entry_rectangle_outline:
+            {
+                render_entry_rectangle_outline *Entry = (render_entry_rectangle_outline *)Data;
+
+                DrawRectangleOutline(DrawBuffer, Entry->Rect, Entry->Color, ClipRect, Entry->Thickness);
+
+                BaseAddress += sizeof(*Entry);
+            } break;
+            case RenderEntryType_render_entry_bitmap:
+            {
+                render_entry_bitmap *Entry = (render_entry_bitmap *)Data;
+
+                //DrawBitmap(DrawBuffer, &Entry->Bitmap, Entry->P.x, Entry->P.y, Entry->Color, ClipRect);
+                //DrawBitmapSIMDRGBA(DrawBuffer, &Entry->Bitmap, Entry->P.x, Entry->P.y, Entry->Color, ClipRect);
+                DrawBitmapSIMD4W(DrawBuffer, &Entry->Bitmap, Entry->P.x, Entry->P.y, Entry->Color, ClipRect);
+
+                BaseAddress += sizeof(*Entry);
+            } break;
+
+            InvalidDefaultCase;
+        }
+    }
+}
+
+static void
+DoTiledRenderWork(void *Data)
+{
+    tiled_render_work *Work = (tiled_render_work *)Data;
+    RenderGroupToOutput(Work->RenderGroup, Work->DrawBuffer, Work->ClipRect);
+}
+
+static void
+TiledRenderGroupToOutput(render_group *RenderGroup, bitmap *DrawBuffer)
+{
+    u32 TileCountX = 2;
+    u32 TileCountY = 3;
+
+    u32 TileWidth = DrawBuffer->Width / TileCountX;
+    u32 TileHeight = DrawBuffer->Height / TileCountY;
+
+    tiled_render_work WorkArray[64] = {};
+    Assert((TileCountX * TileCountY) < ArrayCount(WorkArray));
+
+    u32 WorkIndex = 0;
+    for(u32 TileY = 0; TileY < TileCountY; ++TileY)
+    {
+        for(u32 TileX = 0; TileX < TileCountX; ++TileX)
+        {
+            tiled_render_work *Work = WorkArray + WorkIndex++;
+
+            rect2 ClipRect;
+            ClipRect.Min.x = TileX*TileWidth;
+            ClipRect.Max.x = ClipRect.Min.x + TileWidth;
+            ClipRect.Min.y = TileY*TileHeight;
+            ClipRect.Max.y = ClipRect.Min.y + TileHeight;
+
+            Work->RenderGroup = RenderGroup;
+            Work->DrawBuffer = DrawBuffer;
+            Work->ClipRect = ClipRect;
+
+#if 0
+            //PushRectangleOutline(RenderGroup, ClipRect, V4(1, 0, 1, 1), 1);
+            Platform.AddWorkToQueue(Platform.WorkQueue, DoTiledRenderWork, Work);
+#else
+            DoTiledRenderWork(Work);
+#endif
+        }
+    }
+
+#if 0
+    Platform.CompleteAllWork(Platform.WorkQueue);
+#endif
+}
+
