@@ -90,9 +90,9 @@ PushBitmap(render_group *RenderGroup, bitmap *Bitmap, v2 P, v4 Color = V4(1, 1, 
 static void
 RenderGroupToOutput(render_group *RenderGroup, bitmap *DrawBuffer, rect2 ClipRect)
 {
-    // TODO(rick): Add rectangle2 parameter that is the cliprect
-    // pass cliprect to each of the draw functions
-    // update draw functions to set draw bounds from cliprect
+    // NOTE(rick): Render memory must be aligned on a 16-byte boundary
+    Assert(((umm)DrawBuffer->Data & 15) == 0);
+
     for(u32 BaseAddress = 0;
         BaseAddress < RenderGroup->PushBufferSize;
        )
@@ -108,11 +108,6 @@ RenderGroupToOutput(render_group *RenderGroup, bitmap *DrawBuffer, rect2 ClipRec
                 render_entry_clear *Entry = (render_entry_clear *)Data;
 
                 ClearSIMD(DrawBuffer, Entry->Color, ClipRect);
-                //Clear(DrawBuffer, Entry->Color, ClipRect);
-                //DrawRectangleSIMD4W(DrawBuffer,
-                //                    V2(0, 0),
-                //                    V2((f32)DrawBuffer->Width, (f32)DrawBuffer->Height),
-                //                    Entry->Color, ClipRect);
 
                 BaseAddress += sizeof(*Entry);
             } break;
@@ -120,8 +115,6 @@ RenderGroupToOutput(render_group *RenderGroup, bitmap *DrawBuffer, rect2 ClipRec
             {
                 render_entry_rectangle *Entry = (render_entry_rectangle *)Data;
 
-                //DrawRectangle(DrawBuffer, Entry->Min, Entry->Max, Entry->Color, ClipRect);
-                //DrawRectangleSIMDRGBA(DrawBuffer, Entry->Min, Entry->Max, Entry->Color, ClipRect);
                 DrawRectangleSIMD4W(DrawBuffer, Entry->Min, Entry->Max, Entry->Color, ClipRect);
 
                 BaseAddress += sizeof(*Entry);
@@ -138,8 +131,6 @@ RenderGroupToOutput(render_group *RenderGroup, bitmap *DrawBuffer, rect2 ClipRec
             {
                 render_entry_bitmap *Entry = (render_entry_bitmap *)Data;
 
-                //DrawBitmap(DrawBuffer, &Entry->Bitmap, Entry->P.x, Entry->P.y, Entry->Color, ClipRect);
-                //DrawBitmapSIMDRGBA(DrawBuffer, &Entry->Bitmap, Entry->P.x, Entry->P.y, Entry->Color, ClipRect);
                 DrawBitmapSIMD4W(DrawBuffer, &Entry->Bitmap, Entry->P.x, Entry->P.y, Entry->Color, ClipRect);
 
                 BaseAddress += sizeof(*Entry);
@@ -186,8 +177,8 @@ TiledRenderGroupToOutput(render_group *RenderGroup, bitmap *DrawBuffer)
             Work->DrawBuffer = DrawBuffer;
             Work->ClipRect = ClipRect;
 
-#if 0
-            //PushRectangleOutline(RenderGroup, ClipRect, V4(1, 0, 1, 1), 1);
+#if 1
+            PushRectangleOutline(RenderGroup, ClipRect, V4(1, 0, 1, 1), 1);
             Platform.AddWorkToQueue(Platform.WorkQueue, DoTiledRenderWork, Work);
 #else
             DoTiledRenderWork(Work);
@@ -195,7 +186,7 @@ TiledRenderGroupToOutput(render_group *RenderGroup, bitmap *DrawBuffer)
         }
     }
 
-#if 0
+#if 1
     Platform.CompleteAllWork(Platform.WorkQueue);
 #endif
 }

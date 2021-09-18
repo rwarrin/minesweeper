@@ -524,10 +524,10 @@ WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
     AppMemory.PlatformAPI.CompleteAllWork = Win32CompleteAllWorkQueueWork;
     AppMemory.PlatformAPI.WorkQueue = &WorkQueue;
 
-    AppMemory.PermanentStorageSize = Megabytes(10);
+    AppMemory.PermanentStorageSize = Megabytes(16);
     AppMemory.PermanentStorage = VirtualAlloc((void *)Terabytes(2), AppMemory.PermanentStorageSize,
                                               MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    AppMemory.TransientStorageSize = Megabytes(1);
+    AppMemory.TransientStorageSize = Megabytes(8);
     AppMemory.TransientStorage = VirtualAlloc((void *)Terabytes(3), AppMemory.TransientStorageSize,
                                               MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     AppMemory.FrameStorageSize = Kilobytes(64);
@@ -605,6 +605,9 @@ WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
             f32 TotalMSElapsed = ((f32)(FinalTime.QuadPart - LastTime.QuadPart) / (f32)(CPUFrequency.QuadPart)) * 1000.0f;
             f32 FPS = 1000.0f / TotalMSElapsed;
             AppMemory.PlatformAPI.FPS = FPS;
+            AppMemory.PlatformAPI.FrameTimeActual = MSElapsed;
+            AppMemory.PlatformAPI.FrameTimeTotal = TotalMSElapsed;
+            AppMemory.PlatformAPI.FrameTimeSlept = MSToSleep > 0 ? MSToSleep : 0;
             //DebugWriteLine("%02.2f FPS (%02.2f ms/f %0dms slept)\n", FPS, MSElapsed, MSToSleep > 0 ? MSToSleep : 0);
 
             QueryPerformanceCounter(&LastTime);

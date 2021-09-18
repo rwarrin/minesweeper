@@ -249,7 +249,7 @@ DrawRectangleSIMD4W(bitmap *DrawBuffer, v2 Min, v2 Max, v4 ColorIn, rect2 ClipRe
     f32 ColorInr = ColorIn.r*ColorIn.a;
     f32 ColorIng = ColorIn.g*ColorIn.a;
     f32 ColorInb = ColorIn.b*ColorIn.a;
-    f32 ColorIna = ColorIn.a*255.0f;
+    f32 ColorIna = ColorIn.a;
 
     s32 MinX = Min.x;
     s32 MinY = Min.y;
@@ -263,14 +263,16 @@ DrawRectangleSIMD4W(bitmap *DrawBuffer, v2 Min, v2 Max, v4 ColorIn, rect2 ClipRe
 
     __m128 Inv255 = _mm_set1_ps(1.0f / 255.0f);
     __m128 _255 = _mm_set1_ps(255.0f);
-    __m128 DestAContrib = _mm_set1_ps(1.0f - ColorIn.a);
-    __m128i MaxPixelX = _mm_set1_epi32(MaxX+1);
+    __m128 One = _mm_set1_ps(1.0f);
 
-    __m128 Colora = _mm_setr_ps(ColorIna, ColorIna, ColorIna, ColorIna);
-    __m128 Colorr = _mm_setr_ps(ColorInr, ColorInr, ColorInr, ColorInr);
-    __m128 Colorg = _mm_setr_ps(ColorIng, ColorIng, ColorIng, ColorIng);
-    __m128 Colorb = _mm_setr_ps(ColorInb, ColorInb, ColorInb, ColorInb);
+    __m128 ColorInA = _mm_set1_ps(ColorIn.a);
+    __m128 Colora = _mm_mul_ps(_mm_setr_ps(ColorIna, ColorIna, ColorIna, ColorIna), _255);
+    __m128 Colorr = _mm_mul_ps(_mm_setr_ps(ColorInr, ColorInr, ColorInr, ColorInr), _255);
+    __m128 Colorg = _mm_mul_ps(_mm_setr_ps(ColorIng, ColorIng, ColorIng, ColorIng), _255);
+    __m128 Colorb = _mm_mul_ps(_mm_setr_ps(ColorInb, ColorInb, ColorInb, ColorInb), _255);
     __m128i MaskFF = _mm_set1_epi32(0xFF);
+
+    __m128i MaxPixelX = _mm_set1_epi32(MaxX);
 
     for(s32 Y = MinY; Y < MaxY; ++Y)
     {
@@ -283,35 +285,24 @@ DrawRectangleSIMD4W(bitmap *DrawBuffer, v2 Min, v2 Max, v4 ColorIn, rect2 ClipRe
 
             // NOTE(rick): Load
             __m128i OriginalDest = _mm_load_si128((__m128i *)Pixel);
-            __m128i OriginalDesta = _mm_and_si128(_mm_srli_si128(OriginalDest, 24), MaskFF);
-            __m128i OriginalDestr = _mm_and_si128(_mm_srli_si128(OriginalDest, 16), MaskFF);
-            __m128i OriginalDestg = _mm_and_si128(_mm_srli_si128(OriginalDest,  8), MaskFF);
-            __m128i OriginalDestb = _mm_and_si128(_mm_srli_si128(OriginalDest,  0), MaskFF);
+            __m128i OriginalDesta = _mm_and_si128(_mm_srli_epi32(OriginalDest, 24), MaskFF);
+            __m128i OriginalDestr = _mm_and_si128(_mm_srli_epi32(OriginalDest, 16), MaskFF);
+            __m128i OriginalDestg = _mm_and_si128(_mm_srli_epi32(OriginalDest,  8), MaskFF);
+            __m128i OriginalDestb = _mm_and_si128(_mm_srli_epi32(OriginalDest,  0), MaskFF);
 
-            // NOTE(rick): 
+            // NOTE(rick): Convert to float
             __m128 Desta = _mm_cvtepi32_ps(OriginalDesta);
             __m128 Destr = _mm_cvtepi32_ps(OriginalDestr);
             __m128 Destg = _mm_cvtepi32_ps(OriginalDestg);
             __m128 Destb = _mm_cvtepi32_ps(OriginalDestb);
 
-                // NOTE(rick): RGB255 to Linear0
-            __m128 LinearDesta = _mm_mul_ps(Desta, Inv255);
-            __m128 LinearDestr = _mm_mul_ps(Destr, Inv255);
-            __m128 LinearDestg = _mm_mul_ps(Destg, Inv255);
-            __m128 LinearDestb = _mm_mul_ps(Destb, Inv255);
-
             // NOTE(rick): Alpha Blend
             // (1.0f - ColorIn.a)*Dest.X + ColorIn.X
-            __m128 Resulta = _mm_add_ps(_mm_mul_ps(DestAContrib, LinearDesta), Colora);
-            __m128 Resultr = _mm_add_ps(_mm_mul_ps(DestAContrib, LinearDestr), Colorr);
-            __m128 Resultg = _mm_add_ps(_mm_mul_ps(DestAContrib, LinearDestg), Colorg);
-            __m128 Resultb = _mm_add_ps(_mm_mul_ps(DestAContrib, LinearDestb), Colorb);
-
-            // NOTE(rick): Linear1 To RGB255
-            Resulta = _mm_mul_ps(Resulta, _255);
-            Resultr = _mm_mul_ps(Resultr, _255);
-            Resultg = _mm_mul_ps(Resultg, _255);
-            Resultb = _mm_mul_ps(Resultb, _255);
+            __m128 DestAContrib = _mm_sub_ps(One, ColorInA);
+            __m128 Resulta = _mm_add_ps(_mm_mul_ps(DestAContrib, Desta), Colora);
+            __m128 Resultr = _mm_add_ps(_mm_mul_ps(DestAContrib, Destr), Colorr);
+            __m128 Resultg = _mm_add_ps(_mm_mul_ps(DestAContrib, Destg), Colorg);
+            __m128 Resultb = _mm_add_ps(_mm_mul_ps(DestAContrib, Destb), Colorb);
 
             // NOTE(rick): Convert to integer
             __m128i ResultInta = _mm_cvtps_epi32(Resulta);
@@ -347,6 +338,11 @@ static void
 DrawRectangleOutline(bitmap *DrawBuffer, rect2 Rect, v4 Color, rect2 ClipRect, f32 Thickness = 1.0f)
 {
 #if 0
+    DrawRectangle(DrawBuffer, Rect.Min, V2(Rect.Max.x, Rect.Min.y + Thickness), Color, ClipRect);
+    DrawRectangle(DrawBuffer, V2(Rect.Min.x, Rect.Max.y - Thickness), Rect.Max, Color, ClipRect);
+    DrawRectangle(DrawBuffer, Rect.Min + V2(0, 1), V2(Rect.Min.x + Thickness, Rect.Max.y) - V2(0, 1), Color, ClipRect);
+    DrawRectangle(DrawBuffer, V2(Rect.Max.x - Thickness, Rect.Min.y) + V2(0, 1), Rect.Max - V2(0, 1), Color, ClipRect);
+#elif 0
     // NOTE(rick): RGBA Method is faster for drawing outlines
     DrawRectangleSIMD4W(DrawBuffer, Rect.Min, V2(Rect.Max.x, Rect.Min.y + Thickness), Color, ClipRect);
     DrawRectangleSIMD4W(DrawBuffer, V2(Rect.Min.x, Rect.Max.y - Thickness), Rect.Max, Color, ClipRect);
@@ -400,7 +396,6 @@ DrawBitmap(bitmap *DrawBuffer, bitmap *Bitmap, f32 XIn, f32 YIn, v4 Color, rect2
         YMinSource += Absolute(YMinOut - YIn);
     }
 
-    //u32 *SourceRow = (u32 *)Bitmap->Data + (YMinSource * Bitmap->Width) + XMinSource;
     u32 *SourceRow = (u32 *)Bitmap->Data + (((Bitmap->Height-1)-YMinSource) * Bitmap->Width) + XMinSource;
     u32 *DestRow = (u32 *)DrawBuffer->Data + (YMinOut * DrawBuffer->Width) + XMinOut;
     for(s32 Y = YMinOut; Y < YMaxOut; ++Y)
@@ -428,7 +423,6 @@ DrawBitmap(bitmap *DrawBuffer, bitmap *Bitmap, f32 XIn, f32 YIn, v4 Color, rect2
         }
         
         SourceRow -= Bitmap->Width;
-        //SourceRow += Bitmap->Width;
         DestRow += DrawBuffer->Width;
     }
 }
@@ -774,7 +768,6 @@ DrawText(render_group *RenderGroup, font_map *FontMap, f32 XIn, f32 YIn, char *S
             f32 Blue = 0.0f;
             f32 Alpha = 0.0f;
 
-            // TODO(rick): Parse this myself
             sscanf(Character, "%f,%f,%f,%f", &Red, &Green, &Blue, &Alpha);
 
             Color = {Red, Green, Blue, Alpha};
@@ -823,7 +816,7 @@ PushText(render_group *RenderGroup, font_map *FontMap, v2 P, char *String, v4 Co
     DrawText(RenderGroup, FontMap, P.x, P.y, String, Color);
 }
 
-// TODO(rick): Push strings onto the render group?!?!
+// TODO(rick): Push strings onto the render group??
 #define PushText(RenderGroup, FontMap, P, Color, Format, ...) \
 { \
     char Buffer[256] = {}; \

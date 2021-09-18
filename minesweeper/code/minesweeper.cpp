@@ -2,29 +2,15 @@
  * TODO(rick):
  *
  * GAMEPLAY
- * - Push strings onto RenderGroup/TransArena
  *
  * RENDERING
- * - Weird alpha blending problem in draw rectangle
- * - Support for top-down and bottom-up bitmaps
  *
  * ENGINE FEATURES
- * - Memory Arenas
- *   - Alignment
- * - Assets
- *   - Asset bundle file
- *   - Loading assets
- *   - Referencing assets
- *   - Asset management
- *
- * AUDIO
- * - Platform playback
- * - Sound effects
- * - Music
  *
  * PLATFORM
  *
  * --- CODE CLEAN UP ---
+ *  - TODOs
  **/
 
 #include <stdio.h>
@@ -35,13 +21,13 @@
 #include "minesweeper_intrinsics.h"
 #include "minesweeper_math.h"
 #include "minesweeper_render_group.h"
+#include "minesweeper_asset_ids.h"
 #include "minesweeper.h"
 
 static platform_api Platform;
 
 #include "minesweeper_renderer.cpp"
 #include "minesweeper_render_group.cpp"
-
 
 static color_settings
 GetDefaultColorSettings()
@@ -273,8 +259,84 @@ static v2
 CenterTextAtPoint(game_state *GameState, v2 At, char *String)
 {
     v2 Result = At;
-    rect2 TextBounds = GetTextBounds(GameState->FontMap, String);
+    rect2 TextBounds = GetTextBounds(GameState->Fonts[FontID_LibMono], String);
     Result.x -= 0.5f*(TextBounds.Max.x - TextBounds.Min.x);
+    return(Result);
+}
+
+static b32
+LoadAssetsFromAssetPack(game_state *GameState, memory_arena *Arena, char *FileName)
+{
+    b32 Result = false;
+
+    file_result AssetFileResult = Platform.ReadFile(FileName);
+    if(AssetFileResult.Contents)
+    {
+        asset_file *AssetFile = (asset_file *)AssetFileResult.Contents;
+
+        u32 BitmapCount = AssetFile->BitmapCount;
+        Assert(BitmapCount > 0);
+        bitmap_file *BitmapFileArray = (bitmap_file *)((u8 *)AssetFile + AssetFile->BitmapsOffset);
+
+        bitmap *BitmapEntry = &GameState->Bitmaps[1]; // NOTE(rick): 0 is reserved for the NULL bitmap
+        for(u32 BitmapIndex = 0;
+            BitmapIndex < BitmapCount;
+            ++BitmapIndex)
+        {
+            bitmap_file *BitmapFileEntry = BitmapFileArray + BitmapIndex;
+
+            BitmapEntry->Width = BitmapFileEntry->InfoHeader.Width;
+            BitmapEntry->Height = Absolute(BitmapFileEntry->InfoHeader.Height);
+            BitmapEntry->Pitch = BitmapEntry->Width*4;
+            BitmapEntry->RedMask = GetColorMask(BitmapFileEntry->InfoHeader.RedMask);
+            BitmapEntry->GreenMask = GetColorMask(BitmapFileEntry->InfoHeader.GreenMask);
+            BitmapEntry->BlueMask = GetColorMask(BitmapFileEntry->InfoHeader.BlueMask);
+            BitmapEntry->AlphaMask = GetColorMask(~(BitmapFileEntry->InfoHeader.RedMask | BitmapFileEntry->InfoHeader.GreenMask | BitmapFileEntry->InfoHeader.BlueMask));
+
+            u32 DataSize = BitmapEntry->Height*BitmapEntry->Pitch;
+            BitmapEntry->Data = (u8 *)PushSize(Arena, DataSize, 16);
+            Copy(BitmapEntry->Data, (u8 *)AssetFile + BitmapFileEntry->FileHeader.DataOffset, DataSize);
+
+            ++BitmapEntry;
+        }
+
+        u32 FontCount = AssetFile->FontCount;
+        Assert(FontCount == (FontID_Count - 1));  // NOTE(rick): 0 is reserved for the NULL font
+
+        font_map **FontMapEntry = &GameState->Fonts[1];
+        for(u32 FontMapIndex = 0;
+            FontMapIndex < FontCount;
+            ++FontMapIndex)
+        {
+            u32 FontMapOffset = *(u32 *)(((u8 *)AssetFile + AssetFile->FontsOffset) + FontMapIndex);
+            font_map *FontMapFile = (font_map *)((u8 *)AssetFile + FontMapOffset);
+
+            font_map *FontMap = (font_map *)PushSize(Arena, FontMapFile->FileSize, 4);
+            Copy(FontMap, FontMapFile, FontMapFile->FileSize);
+
+            *FontMapEntry = FontMap;
+            if(!InitializeFontMap(FontMap))
+            {
+                Assert(!"Failed to init font!");
+            }
+
+            FontMapEntry++;
+        }
+
+        Platform.FreeMemory(AssetFileResult.Contents);
+        Result = true;
+    }
+
+    return(Result);
+}
+
+static bitmap *
+GetBitmap(game_state *GameState, bitmap_asset_id BitmapID)
+{
+    Assert(BitmapID > BitmapID_None);
+    Assert(BitmapID < BitmapID_Count);
+
+    bitmap *Result = GameState->Bitmaps + BitmapID;
     return(Result);
 }
 
@@ -284,7 +346,7 @@ LoadBitmapAsset(game_state *GameState, memory_arena *Arena, bitmap_asset_id Bitm
     b32 Result = false;
     Assert(BitmapID < BitmapID_Count);
 
-    struct bitmap *Bitmap = GameState->Bitmaps + BitmapID;
+    bitmap *Bitmap = GetBitmap(GameState, BitmapID);
     file_result BitmapFileResult = Platform.ReadFile(FileName);
     if(BitmapFileResult.Contents)
     {
@@ -299,7 +361,7 @@ LoadBitmapAsset(game_state *GameState, memory_arena *Arena, bitmap_asset_id Bitm
         Bitmap->AlphaMask = GetColorMask(~(BitmapFile->InfoHeader.RedMask | BitmapFile->InfoHeader.GreenMask | BitmapFile->InfoHeader.BlueMask));
 
         u32 DataSize = Bitmap->Height*Bitmap->Pitch;
-        Bitmap->Data = (u8 *)PushSize(Arena, DataSize);
+        Bitmap->Data = (u8 *)PushSize(Arena, DataSize, 16);
         Copy(Bitmap->Data, (u8 *)BitmapFile + BitmapFile->FileHeader.DataOffset, DataSize);
 
         Result = true;
@@ -313,7 +375,7 @@ BitmapButton(game_state *GameState, render_group *RenderGroup, v2 At, v2 MouseAt
              bitmap_asset_id ID, v4 Color, v4 HotColor)
 {
     b32 IsHot = false;
-    bitmap *Bitmap = &GameState->Bitmaps[ID];
+    bitmap *Bitmap = GetBitmap(GameState, ID);
 
     v4 RenderColor = Color;
     if(IsInRectangle(Rect2(At, At + V2(Bitmap->Width, Bitmap->Height)), MouseAt))
@@ -336,23 +398,6 @@ UPDATE_AND_RENDER(UpdateAndRender)
                         (u8 *)AppMemory->PermanentStorage + sizeof(game_state),
                         AppMemory->PermanentStorageSize - sizeof(game_state));
 
-        file_result FontFile = Platform.ReadFile("font.fmp");
-        if(FontFile.Contents)
-        {
-            GameState->FontMap = (font_map *)PushSize(&GameState->GameArena, FontFile.FileSize);
-            Copy(GameState->FontMap, FontFile.Contents, FontFile.FileSize);
-            if(!InitializeFontMap(GameState->FontMap))
-            {
-                Assert(!"Failed to init font!");
-            }
-
-            Platform.FreeMemory(FontFile.Contents);
-        }
-        else
-        {
-            Assert(!"Failed to load font!");
-        }
-
         // TODO(rick): Move this into the input struct and seed it from a time
         // based rand() call in the platform?
         // TODO(rick): Seed this from Platform.GetMSElapsed64() plus some
@@ -366,18 +411,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
         Assert(GameState->GameGrid);
 
         GameState->GameSettings.Colors = GetDefaultColorSettings();
-#if 0
-        // TODO(rick): Load saved configuration?
-        color_settings ColorSettingsFromFile = {};
-        if(LoadColorSettingsFromFile(&ColorSettingsFromFile))
-        {
-            GameState->GameSettings.Colors = ColorSettingsFromFile;
-        }
-#endif
-
         GameState->GameMode = GameMode_Menu;
-        //ChangeGameSettings(GameState, DifficultyType_Easy, GridSizeType_Small);
-        //BeginNewGame(GameState);
 
         GameState->IsInitialized = true;
     }
@@ -389,35 +423,11 @@ UPDATE_AND_RENDER(UpdateAndRender)
                         (u8 *)AppMemory->TransientStorage + sizeof(transient_state),
                         AppMemory->TransientStorageSize - sizeof(transient_state));
 
-        // TODO(rick): Use the TransState instead of GameState
-        Assert(LoadBitmapAsset(GameState, &TransState->TransArena, BitmapID_Back, "back.bmp"));
-        Assert(LoadBitmapAsset(GameState, &TransState->TransArena, BitmapID_Check, "check.bmp"));
-        Assert(LoadBitmapAsset(GameState, &TransState->TransArena, BitmapID_Clock, "clock.bmp"));
-        Assert(LoadBitmapAsset(GameState, &TransState->TransArena, BitmapID_Exclamation, "exclamation.bmp"));
-        Assert(LoadBitmapAsset(GameState, &TransState->TransArena, BitmapID_Flag, "flag.bmp"));
-        Assert(LoadBitmapAsset(GameState, &TransState->TransArena, BitmapID_Gear, "gear.bmp"));
-        Assert(LoadBitmapAsset(GameState, &TransState->TransArena, BitmapID_Home, "home.bmp"));
-        Assert(LoadBitmapAsset(GameState, &TransState->TransArena, BitmapID_Leaderboard, "leaderboard.bmp"));
-        Assert(LoadBitmapAsset(GameState, &TransState->TransArena, BitmapID_Left, "left.bmp"));
-        Assert(LoadBitmapAsset(GameState, &TransState->TransArena, BitmapID_Light, "light.bmp"));
-        Assert(LoadBitmapAsset(GameState, &TransState->TransArena, BitmapID_Right, "right.bmp"));
-
+        Assert(LoadAssetsFromAssetPack(GameState, &TransState->TransArena, "data.mdp"));
         TransState->IsInitialized = true;
     }
 
-    if(0)
-    {
-        temporary_memory RenderMemory = BeginTemporaryMemory(&TransState->TransArena);
-        render_group *RenderGroup = AllocateRenderGroup(&TransState->TransArena, Kilobytes(128));
-
-        PushClear(RenderGroup, V4(0, 0, 0, 1));
-        PushBitmap(RenderGroup, &GameState->Bitmaps[BitmapID_Clock], V2(10, 10), V4(1, 1, 1, 1));
-
-        TiledRenderGroupToOutput(RenderGroup, DrawBuffer);
-        EndTemporaryMemory(RenderMemory);
-        CheckArena(&TransState->TransArena);
-    }
-    else if(GameState->GameMode == GameMode_Menu)
+    if(GameState->GameMode == GameMode_Menu)
     {
         menu_state *Menu = &GameState->MainMenuState;
         if(!GameState->MainMenuState.Initialized)
@@ -472,7 +482,6 @@ UPDATE_AND_RENDER(UpdateAndRender)
 
 
         PushClear(RenderGroup, GameState->GameSettings.Colors.None);
-        //PushText(RenderGroup, GameState->FontMap, 0.5f*V2(DrawBuffer->Width, DrawBuffer->Height), V4(1, 0, 1, 1), "qypj,._");
 
         v2 MouseAt = {(f32)Input->MouseX, (f32)Input->MouseY};
         v2 MenuTextAt = V2(DrawBuffer->Width, DrawBuffer->Height)*0.5f;
@@ -481,11 +490,11 @@ UPDATE_AND_RENDER(UpdateAndRender)
             menu_item *MenuItem = Menu->Items + MenuIndex;
             char *Label = MenuItemStringTable[(s32)MenuItem->ID];
 
-            rect2 TextBounds = GetTextBounds(GameState->FontMap, Label);
+            rect2 TextBounds = GetTextBounds(GameState->Fonts[FontID_LibMono], Label);
             v2 TextAt = MenuTextAt;
             TextAt.x -= 0.5f*(TextBounds.Max.x - TextBounds.Min.x);
-            TextBounds.Min += TextAt - V2(4, GetLineAdvance(GameState->FontMap) - 3);
-            TextBounds.Max += TextAt - V2(-4, GetLineAdvance(GameState->FontMap) - 3);
+            TextBounds.Min += TextAt - V2(4, GetLineAdvance(GameState->Fonts[FontID_LibMono]) - 3);
+            TextBounds.Max += TextAt - V2(-4, GetLineAdvance(GameState->Fonts[FontID_LibMono]) - 3);
 
             b32 ItemSelected = false;
             if(IsInRectangle(TextBounds, MouseAt))
@@ -532,11 +541,11 @@ UPDATE_AND_RENDER(UpdateAndRender)
                 }
             }
             
-            PushText(RenderGroup, GameState->FontMap, TextAt, Color, Label);
-            MenuTextAt.y += GetLineAdvance(GameState->FontMap);
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextAt, Color, Label);
+            MenuTextAt.y += GetLineAdvance(GameState->Fonts[FontID_LibMono]);
         }
 
-        MenuTextAt.y += 2.0f*GetLineAdvance(GameState->FontMap);
+        MenuTextAt.y += 2.0f*GetLineAdvance(GameState->Fonts[FontID_LibMono]);
         v2 FormatTextShift = CenterTextAtPoint(GameState, MenuTextAt, "##CX.X,X.X,X.X,X.X##");
         v2 Offset = MenuTextAt - FormatTextShift;
 
@@ -551,14 +560,13 @@ UPDATE_AND_RENDER(UpdateAndRender)
         // the function. Fix this to avoid the double snprintf..
         char DifficultyHelpText[256] = {};
         snprintf(DifficultyHelpText, ArrayCount(DifficultyHelpText), "Difficulty: ##C%s##%s", SettingColorString, MenuDifficultyStringTable[Menu->DifficultyIndex]);
-        PushText(RenderGroup, GameState->FontMap, CenterTextAtPoint(GameState, MenuTextAt, DifficultyHelpText) + Offset, GameState->GameSettings.Colors.TextMenu, DifficultyHelpText);
+        PushText(RenderGroup, GameState->Fonts[FontID_LibMono], CenterTextAtPoint(GameState, MenuTextAt, DifficultyHelpText) + Offset, GameState->GameSettings.Colors.TextMenu, DifficultyHelpText);
         {
-            rect2 TextRect = GetTextBounds(GameState->FontMap, DifficultyHelpText);
+            rect2 TextRect = GetTextBounds(GameState->Fonts[FontID_LibMono], DifficultyHelpText);
             TextRect.Max.x *= 0.49f;
-            TextRect.Min = CenterTextAtPoint(GameState, MenuTextAt, DifficultyHelpText) + Offset - V2(3, GetLineAdvance(GameState->FontMap) - 3);
+            TextRect.Min = CenterTextAtPoint(GameState, MenuTextAt, DifficultyHelpText) + Offset - V2(3, GetLineAdvance(GameState->Fonts[FontID_LibMono]) - 3);
             TextRect.Max += TextRect.Min;
-            // PushRectangleOutline(RenderGroup, TextRect, GameState->GameSettings.Colors.TextDefault, 1.0f);
-            if(BitmapButton(GameState, RenderGroup, TextRect.Min - V2(GameState->Bitmaps[BitmapID_Left].Width, -1), MouseAt, BitmapID_Left, V4(1, 1, 1, 1), V4(1, 0, 0, 1)) &&
+            if(BitmapButton(GameState, RenderGroup, TextRect.Min - V2(GetBitmap(GameState, BitmapID_Left)->Width, -1), MouseAt, BitmapID_Left, V4(1, 1, 1, 1), V4(1, 0, 0, 1)) &&
                WasDown(Input->MouseButton_Left))
             {
                 --Menu->DifficultyIndex;
@@ -579,18 +587,17 @@ UPDATE_AND_RENDER(UpdateAndRender)
             }
         }
 
-        MenuTextAt.y += GetLineAdvance(GameState->FontMap);
+        MenuTextAt.y += GetLineAdvance(GameState->Fonts[FontID_LibMono]);
 
         char GridSizeHelpText[256] = {};
         snprintf(GridSizeHelpText, ArrayCount(GridSizeHelpText), "Grid size: ##C%s##%s", SettingColorString, MenuSizeStringTable[Menu->GridSizeIndex]);
-        PushText(RenderGroup, GameState->FontMap, CenterTextAtPoint(GameState, MenuTextAt, GridSizeHelpText) + Offset, GameState->GameSettings.Colors.TextMenu, GridSizeHelpText, "small");
+        PushText(RenderGroup, GameState->Fonts[FontID_LibMono], CenterTextAtPoint(GameState, MenuTextAt, GridSizeHelpText) + Offset, GameState->GameSettings.Colors.TextMenu, GridSizeHelpText, "small");
         {
-            rect2 TextRect = GetTextBounds(GameState->FontMap, GridSizeHelpText);
+            rect2 TextRect = GetTextBounds(GameState->Fonts[FontID_LibMono], GridSizeHelpText);
             TextRect.Max.x *= 0.49f;
-            TextRect.Min = CenterTextAtPoint(GameState, MenuTextAt, GridSizeHelpText) + Offset - V2(3, GetLineAdvance(GameState->FontMap) - 3);
+            TextRect.Min = CenterTextAtPoint(GameState, MenuTextAt, GridSizeHelpText) + Offset - V2(3, GetLineAdvance(GameState->Fonts[FontID_LibMono]) - 3);
             TextRect.Max += TextRect.Min;
-            // PushRectangleOutline(RenderGroup, TextRect, GameState->GameSettings.Colors.TextDefault, 1.0f);
-            if(BitmapButton(GameState, RenderGroup, TextRect.Min - V2(GameState->Bitmaps[BitmapID_Left].Width + 5, -1), MouseAt, BitmapID_Left, V4(1, 1, 1, 1), V4(1, 0, 0, 1)) &&
+            if(BitmapButton(GameState, RenderGroup, TextRect.Min - V2(GetBitmap(GameState, BitmapID_Left)->Width + 5, -1), MouseAt, BitmapID_Left, V4(1, 1, 1, 1), V4(1, 0, 0, 1)) &&
                WasDown(Input->MouseButton_Left))
             {
                 --Menu->GridSizeIndex;
@@ -611,8 +618,6 @@ UPDATE_AND_RENDER(UpdateAndRender)
             }
         }
 
-        //rect2 ClipRect = {0.5f*V2(0, 0), 0.5f*V2((f32)DrawBuffer->Width, (f32)DrawBuffer->Height)};
-        //RenderGroupToOutput(RenderGroup, DrawBuffer, ClipRect);
         TiledRenderGroupToOutput(RenderGroup, DrawBuffer);
 
         EndTemporaryMemory(RenderMemory);
@@ -635,7 +640,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
         v2 MouseAt = {(f32)Input->MouseX, (f32)Input->MouseY};
 
         s32 TotalItemIndex = 0;
-        v2 LineAdvance = {0.0f, (f32)GetLineAdvance(GameState->FontMap)};
+        v2 LineAdvance = {0.0f, (f32)GetLineAdvance(GameState->Fonts[FontID_LibMono])};
         v2 TextAt = {0.5f*DrawBuffer->Width, 64.0f};
         for(platform_file_enumeration_result *ThemeGroup = OptionsState->Themes;
             ThemeGroup;
@@ -644,7 +649,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
             for(u32 ItemIndex = 0; ItemIndex < ThemeGroup->Used; ++ItemIndex)
             {
                 v2 TextOutAt = CenterTextAtPoint(GameState, TextAt, ThemeGroup->Items[ItemIndex]);
-                rect2 TextRect = GetTextBounds(GameState->FontMap, ThemeGroup->Items[ItemIndex]);
+                rect2 TextRect = GetTextBounds(GameState->Fonts[FontID_LibMono], ThemeGroup->Items[ItemIndex]);
                 TextRect.Min += TextOutAt - LineAdvance + V2(0, 2);
                 TextRect.Max += TextOutAt - LineAdvance + V2(0, 2);
 
@@ -671,8 +676,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
                         GameState->GameSettings.Colors = NewColorTheme;
                     }
                 }
-                //PushRectangleOutline(RenderGroup, TextRect, V4(1, 1, 1, 1));
-                PushText(RenderGroup, GameState->FontMap, TextOutAt, Color, ThemeGroup->Items[ItemIndex]);
+                PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextOutAt, Color, ThemeGroup->Items[ItemIndex]);
 
                 TextAt += LineAdvance;
                 ++TotalItemIndex;
@@ -705,8 +709,6 @@ UPDATE_AND_RENDER(UpdateAndRender)
             OptionsState->IsInitialized = false;
         }
 
-        //rect2 ClipRect = {V2(0, 0), V2((f32)DrawBuffer->Width, (f32)DrawBuffer->Height)};
-        //RenderGroupToOutput(RenderGroup, DrawBuffer, ClipRect);
         TiledRenderGroupToOutput(RenderGroup, DrawBuffer);
         EndTemporaryMemory(RenderMemory);
         CheckArena(&TransState->TransArena);
@@ -758,7 +760,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
         char PaginationBuffer[64] = {};
         snprintf(PaginationBuffer, ArrayCount(PaginationBuffer), "Page %d of %d",
                  ScoresState->CurrentPage + 1, ScoresState->TotalPages);
-        PushText(RenderGroup, GameState->FontMap, CenterTextAtPoint(GameState, PageTextAt, PaginationBuffer),
+        PushText(RenderGroup, GameState->Fonts[FontID_LibMono], CenterTextAtPoint(GameState, PageTextAt, PaginationBuffer),
                  GameState->GameSettings.Colors.TextDefault, PaginationBuffer);
         if(BitmapButton(GameState, RenderGroup, PageTextAt - V2(130.0f, 16.0f), MouseAt, BitmapID_Left,
                         GameState->GameSettings.Colors.TextDefault, GameState->GameSettings.Colors.TextMenuCurrent) &&
@@ -774,9 +776,9 @@ UPDATE_AND_RENDER(UpdateAndRender)
         }
 
         v2 TextAt = {5.0f, 100.0f};
-        PushText(RenderGroup, GameState->FontMap, TextAt, GameState->GameSettings.Colors.TextDefault, 
+        PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextAt, GameState->GameSettings.Colors.TextDefault, 
                  "Difficulty Size    Date           Time");
-        TextAt.y += GetLineAdvance(GameState->FontMap) + 5;
+        TextAt.y += GetLineAdvance(GameState->Fonts[FontID_LibMono]) + 5;
         saved_score_data *Scores = (saved_score_data *)ScoresState->ScoreData;
 
         for(s32 ScoreIndex = 0;
@@ -786,13 +788,13 @@ UPDATE_AND_RENDER(UpdateAndRender)
         {
             saved_score_data *Score = Scores + (ScoresState->CurrentPage * ScoresState->ItemsPerPage) + ScoreIndex;
             
-            PushText(RenderGroup, GameState->FontMap, TextAt, GameState->GameSettings.Colors.TextDefault, 
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextAt, GameState->GameSettings.Colors.TextDefault, 
                      "%-11s%-8s%04d-%02d-%02d %10.3fs",
                      MenuDifficultyStringTable[Score->Difficulty],
                      MenuSizeStringTable[Score->GridSize],
                      Score->Year, Score->Month, Score->Day, Score->Time);
 
-            TextAt.y += GetLineAdvance(GameState->FontMap);
+            TextAt.y += GetLineAdvance(GameState->Fonts[FontID_LibMono]);
         }
 
         if((BitmapButton(GameState, RenderGroup, V2(4, 4), MouseAt, BitmapID_Back, 
@@ -805,8 +807,6 @@ UPDATE_AND_RENDER(UpdateAndRender)
             Platform.FreeMemory(ScoresState->ScoresFile.Contents);
         }
 
-        //rect2 ClipRect = {V2(0, 0), V2((f32)DrawBuffer->Width, (f32)DrawBuffer->Height)};
-        //RenderGroupToOutput(RenderGroup, DrawBuffer, ClipRect);
         TiledRenderGroupToOutput(RenderGroup, DrawBuffer);
         EndTemporaryMemory(RenderMemory);
         CheckArena(&TransState->TransArena);
@@ -877,8 +877,6 @@ UPDATE_AND_RENDER(UpdateAndRender)
                                     }
                                     else if(!GridCell->IsRevealed)
                                     {
-                                        // GridCell->IsRevealed = true;
-                                        // ++GameState->RevealedCount;
                                         RecursiveFloodFillReveal(GameState, X, Y);
                                     }
                                 }
@@ -916,14 +914,6 @@ UPDATE_AND_RENDER(UpdateAndRender)
                 // TODO(rick): Replace snprintf
                 f32 SecondsTaken = (f64)(GameState->GameCurrentMSCount - GameState->GameBeginMSCount) / 1000.0f;
                 platform_datetime_result DateTime = Platform.GetDateTime();
-#if 0
-                char TempBuffer[256] = {};
-                s32 Size = snprintf(TempBuffer, ArrayCount(TempBuffer),
-                                    "%4d-%02d-%02d %02d:%02d:%02d - %010.03f\n",
-                                    DateTime.Year, DateTime.Month, DateTime.Day,
-                                    DateTime.Hour, DateTime.Minute, DateTime.Second,
-                                    SecondsTaken);
-#endif
                 saved_score_data Data = {};
                 Data.Difficulty = GameState->MainMenuState.DifficultyIndex;
                 Data.GridSize = GameState->MainMenuState.GridSizeIndex;
@@ -945,13 +935,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
         render_group *RenderGroup = AllocateRenderGroup(&TransState->TransArena, Kilobytes(512));
 
         PushClear(RenderGroup, GameState->GameSettings.Colors.None);
-        PushText(RenderGroup, GameState->FontMap, V2(20, 40), V4(1, 1, 1, 1), "%3.0f fps", Platform.FPS);
-#if 0
-        for(u32 BitmapID = 0; BitmapID < BitmapID_Count; ++BitmapID)
-        {
-            PushBitmap(RenderGroup, &GameState->Bitmaps[BitmapID], V2(BitmapID * 20, 10), V4(1, 0, 1, 1));
-        }
-#endif
+        PushText(RenderGroup, GameState->Fonts[FontID_LibMono], V2(20, 40), V4(1, 1, 1, 1), "%3.0f fps (%02.02fms actual)", Platform.FPS, Platform.FrameTimeActual);
 
         f32 GameGridOutlineThickness = 1.0f;
         v2 GameGridOutlineSize = {GameGridOutlineThickness, GameGridOutlineThickness};
@@ -992,33 +976,32 @@ UPDATE_AND_RENDER(UpdateAndRender)
 
                 if(BitmapID != BitmapID_None)
                 {
-                    v2 BitmapOffset = 0.4f*V2(GameState->Bitmaps[BitmapID].Width, GameState->Bitmaps[BitmapID].Height);
+                    bitmap *Bitmap = GetBitmap(GameState, BitmapID);
+                    v2 BitmapOffset = 0.4f*V2(Bitmap->Width, Bitmap->Height);
                     v2 BitmapP = (MinPoint) + BitmapOffset;
-                    PushBitmap(RenderGroup, &GameState->Bitmaps[BitmapID], BitmapP, V4(0, 0, 0, 1.0f));
+                    PushBitmap(RenderGroup, GetBitmap(GameState, BitmapID), BitmapP, V4(0, 0, 0, 1.0f));
                 }
 
                 if(!CellToDraw->IsBomb && CellToDraw->NeighboringBombCount && CellToDraw->IsRevealed)
                 {
-                    rect2 CellTextBounds = GetTextBounds(GameState->FontMap, NumberStringTable[CellToDraw->NeighboringBombCount]);
+                    rect2 CellTextBounds = GetTextBounds(GameState->Fonts[FontID_LibMono], NumberStringTable[CellToDraw->NeighboringBombCount]);
                     s32 AlignX = 0;
                     s32 AlignY = 0;
-                    GetAlignmentForForCodePoint(GameState->FontMap, NumberStringTable[CellToDraw->NeighboringBombCount][0], &AlignX, &AlignY);
+                    GetAlignmentForForCodePoint(GameState->Fonts[FontID_LibMono], NumberStringTable[CellToDraw->NeighboringBombCount][0], &AlignX, &AlignY);
                     v2 TextP = V2(CellRectangle.Min.x, CellRectangle.Max.y) + 0.5f*V2(GameState->CellSize, -GameState->CellSize) +
                         0.5f*V2(-(CellTextBounds.Max.x - CellTextBounds.Min.x), (CellTextBounds.Max.y - CellTextBounds.Min.y) - 6);
-                    PushText(RenderGroup, GameState->FontMap, TextP+V2(1, 1), GameState->GameSettings.Colors.TextShadow, NumberStringTable[CellToDraw->NeighboringBombCount]);
-                    PushText(RenderGroup, GameState->FontMap, TextP, GameState->GameSettings.Colors.TextCell, NumberStringTable[CellToDraw->NeighboringBombCount]);
+                    PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextP+V2(1, 1), GameState->GameSettings.Colors.TextShadow, NumberStringTable[CellToDraw->NeighboringBombCount]);
+                    PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextP, GameState->GameSettings.Colors.TextCell, NumberStringTable[CellToDraw->NeighboringBombCount]);
                 }
 
-#if 1
                 if(CellToDraw->IsFlagged)
                 {
                     PushRectangleOutline(RenderGroup, CellRectangle, GameState->GameSettings.Colors.CellFlagged, 0.15f*GameState->CellSize);
                 }
-#endif
 
                 if(IsInRectangle(CellRectangle, V2(Input->MouseX, Input->MouseY)))
                 {
-                    PushRectangleOutline(RenderGroup, CellRectangle, GameState->GameSettings.Colors.CellFocused);
+                    PushRectangle(RenderGroup, CellRectangle, V4(1, 1, 1, 0.2f));
                 }
 
                 ++CellToDraw;
@@ -1032,21 +1015,21 @@ UPDATE_AND_RENDER(UpdateAndRender)
             }
             f32 SecondsTaken = (f64)(GameState->GameCurrentMSCount - GameState->GameBeginMSCount) / 1000.0f;
             v2 TimerP = GameGridOffset + V2(0, -2);
-            bitmap *ClockBitmap = &GameState->Bitmaps[BitmapID_Clock];
+            bitmap *ClockBitmap = GetBitmap(GameState, BitmapID_Clock);
             PushBitmap(RenderGroup, ClockBitmap, TimerP - V2(0, ClockBitmap->Height), GameState->GameSettings.Colors.TextHUDTime);
             TimerP += V2(ClockBitmap->Width + 4, 0);
-            PushText(RenderGroup, GameState->FontMap, TimerP, GameState->GameSettings.Colors.TextShadow, "%.02fs", SecondsTaken);
-            PushText(RenderGroup, GameState->FontMap, TimerP-V2(1, 1), GameState->GameSettings.Colors.TextHUDTime, "%.02fs", SecondsTaken);
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TimerP, GameState->GameSettings.Colors.TextShadow, "%.02fs", SecondsTaken);
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TimerP-V2(1, 1), GameState->GameSettings.Colors.TextHUDTime, "%.02fs", SecondsTaken);
 
             char FlagsCountTextBuffer[16] = {};
             snprintf(FlagsCountTextBuffer, ArrayCount(FlagsCountTextBuffer), "%d", GameState->FlagCount);
-            rect2 FlagTextDims = GetTextBounds(GameState->FontMap, FlagsCountTextBuffer);
-            bitmap *FlagBitmap = &GameState->Bitmaps[BitmapID_Flag];
+            rect2 FlagTextDims = GetTextBounds(GameState->Fonts[FontID_LibMono], FlagsCountTextBuffer);
+            bitmap *FlagBitmap = GetBitmap(GameState, BitmapID_Flag);
             v2 FlagTextP = GameGridOffset + V2(0, -2) + V2(GameGridRect.Max.x, 0) - V2(FlagBitmap->Width, 0)/*- V2(FlagTextDims.Max.x - FlagTextDims.Min.x, 0)*/;
             PushBitmap(RenderGroup, FlagBitmap, FlagTextP - V2(0, FlagBitmap->Height), GameState->GameSettings.Colors.TextHUDFlags);
             FlagTextP -= V2(FlagTextDims.Max.x - FlagTextDims.Min.x, 0);
-            PushText(RenderGroup, GameState->FontMap, FlagTextP, GameState->GameSettings.Colors.TextShadow, FlagsCountTextBuffer);
-            PushText(RenderGroup, GameState->FontMap, FlagTextP-V2(1, 1), GameState->GameSettings.Colors.TextHUDFlags, FlagsCountTextBuffer);
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], FlagTextP, GameState->GameSettings.Colors.TextShadow, FlagsCountTextBuffer);
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], FlagTextP-V2(1, 1), GameState->GameSettings.Colors.TextHUDFlags, FlagsCountTextBuffer);
         }
 
         if((GameState->GameMode == GameMode_End) &&
@@ -1066,7 +1049,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
                 Color = GameState->GameSettings.Colors.TextLose;
             }
 
-            rect2 EndStateTextRect = GetTextBounds(GameState->FontMap, EndStateText);
+            rect2 EndStateTextRect = GetTextBounds(GameState->Fonts[FontID_LibMono], EndStateText);
             EndStateP -= V2(0.5f*(EndStateTextRect.Max.x - EndStateTextRect.Min.x),
                             -0.5f*(EndStateTextRect.Max.y - EndStateTextRect.Min.y));
 
@@ -1076,8 +1059,8 @@ UPDATE_AND_RENDER(UpdateAndRender)
             PushRectangle(RenderGroup, BannerRect, GameState->GameSettings.Colors.OverlayBackground); 
             PushRectangleOutline(RenderGroup, BannerRect, GameState->GameSettings.Colors.OverlayBorder); 
 
-            PushText(RenderGroup, GameState->FontMap, EndStateP, GameState->GameSettings.Colors.TextShadow, "%s", EndStateText);
-            PushText(RenderGroup, GameState->FontMap, EndStateP-V2(1, 1), Color, "%s", EndStateText);
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], EndStateP, GameState->GameSettings.Colors.TextShadow, "%s", EndStateText);
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], EndStateP-V2(1, 1), Color, "%s", EndStateText);
         }
 
         v2 HomeP = GameGridOffset + GameGridRect.Max - 0.5f*V2(GameGridRect.Max.x - GameGridRect.Min.x, 0) + V2(0, 6);
@@ -1087,17 +1070,6 @@ UPDATE_AND_RENDER(UpdateAndRender)
             GameState->GameMode = GameMode_Menu;
         }
 
-#if 0
-        f32 VertMinX = DrawBuffer->Width*0.5f - 1;
-        f32 VertMaxX = VertMinX + 2;
-        f32 HorzMinY = DrawBuffer->Height*0.5f - 1;
-        f32 HorzMaxY = HorzMinY + 2;
-        PushRectangle(RenderGroup, V2(VertMinX, 0), V2(VertMaxX, DrawBuffer->Height), V4(1, 1, 1, 1));
-        PushRectangle(RenderGroup, V2(0, HorzMinY), V2(DrawBuffer->Width, HorzMaxY), V4(1, 1, 1, 1));
-#endif
-
-        //rect2 ClipRect = {V2(0, 0), V2((f32)DrawBuffer->Width, (f32)DrawBuffer->Height)};
-        //RenderGroupToOutput(RenderGroup, DrawBuffer, ClipRect);
         TiledRenderGroupToOutput(RenderGroup, DrawBuffer);
 
         EndTemporaryMemory(RenderMemory);

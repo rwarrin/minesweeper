@@ -25,19 +25,32 @@ InitializeArena(memory_arena *Arena, void *Base, u32 Size)
     Arena->TempCount = 0;
 }
 
-#define PushStruct(Arena, type) (type *)PushSize_(Arena, sizeof(type))
-#define PushArray(Arena, count, type) (type *)PushSize_(Arena, sizeof(type)*(count))
-#define PushSize(Arena, size) PushSize_(Arena, size)
+#define PushStruct(Arena, type, ...) (type *)PushSize_(Arena, sizeof(type), ## __VA_ARGS__)
+#define PushArray(Arena, count, type, ...) (type *)PushSize_(Arena, sizeof(type)*(count), ## __VA_ARGS__)
+#define PushSize(Arena, size, ...) PushSize_(Arena, size, ## __VA_ARGS__)
 
 inline void *
-PushSize_(memory_arena *Arena, u32 Size)
+PushSize_(memory_arena *Arena, u32 Size, mem_size Alignment = 4)
 {
+    // NOTE(rick): Alignment must be a power of 2!
+    Assert((Alignment & (Alignment - 1)) == 0);
+
+    smm ResultPointer = (smm)(Arena->Base + Arena->Used);
+    smm AlignmentOffset = 0;
+
+    smm AlignmentMask = Alignment - 4;
+    if(ResultPointer & AlignmentMask)
+    {
+        AlignmentOffset = Alignment - (ResultPointer & AlignmentMask);
+        Size += AlignmentOffset;
+    }
+
     void *Result = 0;
 
     Assert(Arena->Used + Size <= Arena->Size);
     if(Arena->Used + Size < Arena->Size)
     {
-        Result = Arena->Base + Arena->Used;
+        Result = (void *)(ResultPointer + AlignmentOffset);
         Arena->Used += Size;
     }
 

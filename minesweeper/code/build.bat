@@ -9,6 +9,8 @@ SET LinkerFlags=-incremental:no
 
 del *.pdb > NUL 2> NUL
 
+cl.exe %CompilerFlags% ..\minesweeper\code\asset_pipeline.cpp /link %LinkerFlags%
+
 echo WAITING FOR PDB > lock.tmp
 cl.exe %CompilerFlags% -LD ..\minesweeper\code\minesweeper.cpp /link /PDB:minsweeper_%random%.pdb %LinkerFlags% /EXPORT:UpdateAndRender
 del lock.tmp

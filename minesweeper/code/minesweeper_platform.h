@@ -89,6 +89,20 @@ struct bitmap
     u8 *Data;
 };
 
+#define MAGIC_NUMBER(a, b, c, d) ( ((u8)(a) << 0) | ((u8)(b) << 8) | ((u8)(c) << 16) | ((u8)(d) << 24) )
+
+struct asset_file
+{
+#define FILE_MAGIC_NUMBER MAGIC_NUMBER('m', 's', 'w', 'p')
+    u32 MagicNumber;
+
+    u32 BitmapCount;
+    u32 BitmapsOffset;
+
+    u32 FontCount;
+    u32 FontsOffset; // NOTE(rick): Offset to an array of u32's
+};
+
 struct button_state
 {
     s32 TransitionCount;
@@ -210,6 +224,9 @@ struct platform_api
     platform_work_queue *WorkQueue;
 
     f32 FPS;
+    f32 FrameTimeActual;
+    f32 FrameTimeTotal;
+    f32 FrameTimeSlept;
 };
 
 #pragma pack(push, 1)
