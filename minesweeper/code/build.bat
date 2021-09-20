@@ -15,6 +15,6 @@ echo WAITING FOR PDB > lock.tmp
 cl.exe %CompilerFlags% -LD ..\minesweeper\code\minesweeper.cpp /link /PDB:minsweeper_%random%.pdb %LinkerFlags% /EXPORT:UpdateAndRender
 del lock.tmp
 
-cl.exe %CompilerFlags% ..\minesweeper\code\win32_minesweeper.cpp /link %LinkerFlags% user32.lib gdi32.lib winmm.lib
+cl.exe %CompilerFlags% ..\minesweeper\code\win32_minesweeper.cpp /link %LinkerFlags% user32.lib gdi32.lib winmm.lib advapi32.lib
 
 popd

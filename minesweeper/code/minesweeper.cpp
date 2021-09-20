@@ -388,6 +388,42 @@ BitmapButton(game_state *GameState, render_group *RenderGroup, v2 At, v2 MouseAt
     return(IsHot);
 }
 
+inline void
+QuickSortScoreData(game_state *GameState, saved_score_data *Scores, s32 Left, s32 Right)
+{
+    if(Left >= Right)
+    {
+        return;
+    }
+
+    {
+        // NOTE(rick): Select a random pivot to prevent worstcase run time
+        s32 RandomIndex = Left + (GetNextRandomNumber(&GameState->PRNGState) % (Right - Left));
+        saved_score_data Temp = Scores[Right];
+        Scores[Right] = Scores[RandomIndex];
+        Scores[RandomIndex] = Temp;
+    }
+
+    saved_score_data Pivot = Scores[Right];
+    s32 PartitionIndex = Left - 1;
+    for(s32 Index = Left; Index < Right; ++Index)
+    {
+        if(Scores[Index].Time <= Pivot.Time)
+        {
+            saved_score_data Temp = Scores[Index];
+            Scores[Index] = Scores[++PartitionIndex];
+            Scores[PartitionIndex] = Temp;
+        }
+    }
+
+    saved_score_data Temp = Scores[Right];
+    Scores[Right] = Scores[++PartitionIndex];
+    Scores[PartitionIndex] = Temp;
+
+    QuickSortScoreData(GameState, Scores, Left, PartitionIndex - 1);
+    QuickSortScoreData(GameState, Scores, PartitionIndex + 1, Right);
+}
+
 UPDATE_AND_RENDER(UpdateAndRender)
 {
     game_state *GameState = (game_state *)AppMemory->PermanentStorage;
@@ -398,11 +434,8 @@ UPDATE_AND_RENDER(UpdateAndRender)
                         (u8 *)AppMemory->PermanentStorage + sizeof(game_state),
                         AppMemory->PermanentStorageSize - sizeof(game_state));
 
-        // TODO(rick): Move this into the input struct and seed it from a time
-        // based rand() call in the platform?
-        // TODO(rick): Seed this from Platform.GetMSElapsed64() plus some
-        // randomization?
-        GameState->PRNGState = 101377;
+        u32 RandomNumber = Platform.GenerateRandomNumber();
+        GameState->PRNGState = RandomNumber ? RandomNumber : (101377 + Platform.GetMSElapsed64());
 
         GameState->MaxGridWidth = 256;
         GameState->MaxGridHeight = 256;
@@ -410,7 +443,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
         GameState->GameGrid = PushArray(&GameState->GameArena, MaxCellCount, cell);
         Assert(GameState->GameGrid);
 
-        GameState->GameSettings.Colors = GetDefaultColorSettings();
+        GameState->Colors = GetDefaultColorSettings();
         GameState->GameMode = GameMode_Menu;
 
         GameState->IsInitialized = true;
@@ -481,7 +514,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
         render_group *RenderGroup = AllocateRenderGroup(&TransState->TransArena, Kilobytes(128));
 
 
-        PushClear(RenderGroup, GameState->GameSettings.Colors.None);
+        PushClear(RenderGroup, GameState->Colors.None);
 
         v2 MouseAt = {(f32)Input->MouseX, (f32)Input->MouseY};
         v2 MenuTextAt = V2(DrawBuffer->Width, DrawBuffer->Height)*0.5f;
@@ -506,7 +539,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
                 }
             }
 
-            v4 Color = GameState->GameSettings.Colors.TextMenu;
+            v4 Color = GameState->Colors.TextMenu;
             if(MenuIndex == Menu->HotItem)
             {
                 if(WasDown(Input->Keyboard_Space))
@@ -514,7 +547,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
                     ItemSelected = true;
                 }
 
-                Color = GameState->GameSettings.Colors.TextMenuCurrent;
+                Color = GameState->Colors.TextMenuCurrent;
                 PushRectangleOutline(RenderGroup, TextBounds, Color, 1.0f);
             }
 
@@ -551,16 +584,14 @@ UPDATE_AND_RENDER(UpdateAndRender)
 
         char SettingColorString[16] = {};
         snprintf(SettingColorString, ArrayCount(SettingColorString), "%01.1f,%01.1f,%01.1f,%01.1f",
-                 GameState->GameSettings.Colors.TextMenuCurrent.r,
-                 GameState->GameSettings.Colors.TextMenuCurrent.g,
-                 GameState->GameSettings.Colors.TextMenuCurrent.b,
-                 GameState->GameSettings.Colors.TextMenuCurrent.a);
+                 GameState->Colors.TextMenuCurrent.r,
+                 GameState->Colors.TextMenuCurrent.g,
+                 GameState->Colors.TextMenuCurrent.b,
+                 GameState->Colors.TextMenuCurrent.a);
 
-        // TODO(rick): This is using the macro version of PushText rather than
-        // the function. Fix this to avoid the double snprintf..
         char DifficultyHelpText[256] = {};
         snprintf(DifficultyHelpText, ArrayCount(DifficultyHelpText), "Difficulty: ##C%s##%s", SettingColorString, MenuDifficultyStringTable[Menu->DifficultyIndex]);
-        PushText(RenderGroup, GameState->Fonts[FontID_LibMono], CenterTextAtPoint(GameState, MenuTextAt, DifficultyHelpText) + Offset, GameState->GameSettings.Colors.TextMenu, DifficultyHelpText);
+        PushString(RenderGroup, GameState->Fonts[FontID_LibMono], CenterTextAtPoint(GameState, MenuTextAt, DifficultyHelpText) + Offset, DifficultyHelpText, GameState->Colors.TextMenu);
         {
             rect2 TextRect = GetTextBounds(GameState->Fonts[FontID_LibMono], DifficultyHelpText);
             TextRect.Max.x *= 0.49f;
@@ -591,7 +622,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
 
         char GridSizeHelpText[256] = {};
         snprintf(GridSizeHelpText, ArrayCount(GridSizeHelpText), "Grid size: ##C%s##%s", SettingColorString, MenuSizeStringTable[Menu->GridSizeIndex]);
-        PushText(RenderGroup, GameState->Fonts[FontID_LibMono], CenterTextAtPoint(GameState, MenuTextAt, GridSizeHelpText) + Offset, GameState->GameSettings.Colors.TextMenu, GridSizeHelpText, "small");
+        PushText(RenderGroup, GameState->Fonts[FontID_LibMono], CenterTextAtPoint(GameState, MenuTextAt, GridSizeHelpText) + Offset, GameState->Colors.TextMenu, GridSizeHelpText, "small");
         {
             rect2 TextRect = GetTextBounds(GameState->Fonts[FontID_LibMono], GridSizeHelpText);
             TextRect.Max.x *= 0.49f;
@@ -635,7 +666,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
 
         temporary_memory RenderMemory = BeginTemporaryMemory(&TransState->TransArena);
         render_group *RenderGroup = AllocateRenderGroup(&TransState->TransArena, Kilobytes(64));
-        PushClear(RenderGroup, GameState->GameSettings.Colors.None);
+        PushClear(RenderGroup, GameState->Colors.None);
 
         v2 MouseAt = {(f32)Input->MouseX, (f32)Input->MouseY};
 
@@ -653,18 +684,18 @@ UPDATE_AND_RENDER(UpdateAndRender)
                 TextRect.Min += TextOutAt - LineAdvance + V2(0, 2);
                 TextRect.Max += TextOutAt - LineAdvance + V2(0, 2);
 
-                v4 Color = GameState->GameSettings.Colors.TextMenu;
+                v4 Color = GameState->Colors.TextMenu;
                 b32 ShouldLoadTheme = false;
                 if(IsInRectangle(TextRect, MouseAt))
                 {
                     OptionsState->HotItemIndex = TotalItemIndex;
 
-                    Color = GameState->GameSettings.Colors.TextMenuCurrent;
+                    Color = GameState->Colors.TextMenuCurrent;
                     ShouldLoadTheme = WasDown(Input->MouseButton_Left);
                 }
                 else if(TotalItemIndex == OptionsState->HotItemIndex)
                 {
-                    Color = GameState->GameSettings.Colors.TextMenuCurrent;
+                    Color = GameState->Colors.TextMenuCurrent;
                     ShouldLoadTheme = WasDown(Input->Keyboard_Space);
                 }
 
@@ -673,7 +704,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
                     color_settings NewColorTheme = {};
                     if(LoadColorSettingsFromFile(ThemeGroup->Items[ItemIndex], &NewColorTheme))
                     {
-                        GameState->GameSettings.Colors = NewColorTheme;
+                        GameState->Colors = NewColorTheme;
                     }
                 }
                 PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextOutAt, Color, ThemeGroup->Items[ItemIndex]);
@@ -721,8 +752,15 @@ UPDATE_AND_RENDER(UpdateAndRender)
             ScoresState->ScoresFile = Platform.ReadFile("Scores.dat");
             if(ScoresState->ScoresFile.Contents)
             {
+#if 1
                 ScoresState->ScoreData = (saved_score_data *)ScoresState->ScoresFile.Contents;
-                // TODO(rick): Better sort?
+                saved_score_data *ScoresStart = ScoresState->ScoreData;
+                saved_score_data *OnePastLastScore = (saved_score_data *)((u8 *)ScoresStart + ScoresState->ScoresFile.FileSize);
+                s32 ScoresCount = (OnePastLastScore - ScoresStart);
+                QuickSortScoreData(GameState, ScoresStart, 0, ScoresCount - 1);
+#else
+                // NOTE(rick): Simple bubble-sort
+                ScoresState->ScoreData = (saved_score_data *)ScoresState->ScoresFile.Contents;
                 saved_score_data *ScoresBase = ScoresState->ScoreData;
                 saved_score_data *OnePastLast = (saved_score_data *)((u8 *)ScoresBase + ScoresState->ScoresFile.FileSize);
                 s32 ScoresCount = (OnePastLast - ScoresBase);
@@ -740,6 +778,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
                         }
                     }
                 }
+#endif
 
                 ScoresState->ItemsPerPage = 10;
                 ScoresState->CurrentPage = 0;
@@ -754,29 +793,29 @@ UPDATE_AND_RENDER(UpdateAndRender)
 
         temporary_memory RenderMemory = BeginTemporaryMemory(&TransState->TransArena);
         render_group *RenderGroup = AllocateRenderGroup(&TransState->TransArena, Kilobytes(64));
-        PushClear(RenderGroup, GameState->GameSettings.Colors.None);
+        PushClear(RenderGroup, GameState->Colors.None);
 
         v2 PageTextAt = {0.5f*DrawBuffer->Width, 70.0f};
         char PaginationBuffer[64] = {};
         snprintf(PaginationBuffer, ArrayCount(PaginationBuffer), "Page %d of %d",
                  ScoresState->CurrentPage + 1, ScoresState->TotalPages);
         PushText(RenderGroup, GameState->Fonts[FontID_LibMono], CenterTextAtPoint(GameState, PageTextAt, PaginationBuffer),
-                 GameState->GameSettings.Colors.TextDefault, PaginationBuffer);
+                 GameState->Colors.TextDefault, PaginationBuffer);
         if(BitmapButton(GameState, RenderGroup, PageTextAt - V2(130.0f, 16.0f), MouseAt, BitmapID_Left,
-                        GameState->GameSettings.Colors.TextDefault, GameState->GameSettings.Colors.TextMenuCurrent) &&
+                        GameState->Colors.TextDefault, GameState->Colors.TextMenuCurrent) &&
            WasDown(Input->MouseButton_Left))
         {
             ScoresState->CurrentPage = MAX(ScoresState->CurrentPage - 1, 0);
         }
         if(BitmapButton(GameState, RenderGroup, PageTextAt + V2(110.0f, -16.0f), MouseAt, BitmapID_Right,
-                        GameState->GameSettings.Colors.TextDefault, GameState->GameSettings.Colors.TextMenuCurrent) &&
+                        GameState->Colors.TextDefault, GameState->Colors.TextMenuCurrent) &&
                 WasDown(Input->MouseButton_Left))
         {
             ScoresState->CurrentPage = MIN(ScoresState->CurrentPage + 1, ScoresState->TotalPages - 1);
         }
 
         v2 TextAt = {5.0f, 100.0f};
-        PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextAt, GameState->GameSettings.Colors.TextDefault, 
+        PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextAt, GameState->Colors.TextDefault, 
                  "Difficulty Size    Date           Time");
         TextAt.y += GetLineAdvance(GameState->Fonts[FontID_LibMono]) + 5;
         saved_score_data *Scores = (saved_score_data *)ScoresState->ScoreData;
@@ -788,7 +827,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
         {
             saved_score_data *Score = Scores + (ScoresState->CurrentPage * ScoresState->ItemsPerPage) + ScoreIndex;
             
-            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextAt, GameState->GameSettings.Colors.TextDefault, 
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextAt, GameState->Colors.TextDefault, 
                      "%-11s%-8s%04d-%02d-%02d %10.3fs",
                      MenuDifficultyStringTable[Score->Difficulty],
                      MenuSizeStringTable[Score->GridSize],
@@ -798,7 +837,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
         }
 
         if((BitmapButton(GameState, RenderGroup, V2(4, 4), MouseAt, BitmapID_Back, 
-                         GameState->GameSettings.Colors.TextDefault, GameState->GameSettings.Colors.TextMenuCurrent) &&
+                         GameState->Colors.TextDefault, GameState->Colors.TextMenuCurrent) &&
            WasDown(Input->MouseButton_Left)) ||
            WasDown(Input->Keyboard_Escape))
         {
@@ -818,7 +857,8 @@ UPDATE_AND_RENDER(UpdateAndRender)
             GameState->GameMode = GameMode_Menu;
         }
 
-        if(WasDown(Input->Keyboard_N))
+        if( ((GameState->GameMode == GameMode_Playing) && WasDown(Input->Keyboard_N)) ||
+            ((GameState->GameMode == GameMode_End) && WasDown(Input->Keyboard_Space)) )
         {
             BeginNewGame(GameState);
         }
@@ -870,7 +910,6 @@ UPDATE_AND_RENDER(UpdateAndRender)
                                 {
                                     if(GridCell->IsBomb)
                                     {
-                                        // TODO(rick): Game over
                                         GameState->GameMode = GameMode_End;
                                         GameState->TimerActive = false;
                                         GameState->EndState = EndState_Lose;
@@ -911,7 +950,6 @@ UPDATE_AND_RENDER(UpdateAndRender)
                (GameState->BombCount == CorrectlyPlacedFlags) &&
                (GameState->GameMode == GameMode_Playing))
             {
-                // TODO(rick): Replace snprintf
                 f32 SecondsTaken = (f64)(GameState->GameCurrentMSCount - GameState->GameBeginMSCount) / 1000.0f;
                 platform_datetime_result DateTime = Platform.GetDateTime();
                 saved_score_data Data = {};
@@ -934,7 +972,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
         temporary_memory RenderMemory = BeginTemporaryMemory(&TransState->TransArena);
         render_group *RenderGroup = AllocateRenderGroup(&TransState->TransArena, Kilobytes(512));
 
-        PushClear(RenderGroup, GameState->GameSettings.Colors.None);
+        PushClear(RenderGroup, GameState->Colors.None);
         PushText(RenderGroup, GameState->Fonts[FontID_LibMono], V2(20, 40), V4(1, 1, 1, 1), "%3.0f fps (%02.02fms actual)", Platform.FPS, Platform.FrameTimeActual);
 
         f32 GameGridOutlineThickness = 1.0f;
@@ -942,7 +980,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
         rect2 GameGridDim = Rect2(GameGridOffset + V2(0, 0) - GameGridOutlineSize,
                                   GameGridOffset + GameState->CellSize*V2(GameState->GridWidth, GameState->GridHeight) +
                                   GameGridOutlineSize + GameState->CellSpacing*V2(GameState->GridWidth-1, GameState->GridHeight-1));
-        PushRectangleOutline(RenderGroup, GameGridDim, GameState->GameSettings.Colors.CellBorder, GameGridOutlineThickness);
+        PushRectangleOutline(RenderGroup, GameGridDim, GameState->Colors.CellBorder, GameGridOutlineThickness);
 
         f32 BombColorBucket = (255.0f / 9.0f);
         cell *CellToDraw = GameState->GameGrid;
@@ -955,24 +993,24 @@ UPDATE_AND_RENDER(UpdateAndRender)
                 rect2 CellRectangle = Rect2(MinPoint, MaxPoint);
 
                 bitmap_asset_id BitmapID = BitmapID_None;
-                v4 Color = GameState->GameSettings.Colors.CellHidden;
+                v4 Color = GameState->Colors.CellHidden;
                 if(CellToDraw->IsRevealed)
                 {
-                    Color = GameState->GameSettings.Colors.CellRevealed;
+                    Color = GameState->Colors.CellRevealed;
                 }
                 else if(CellToDraw->IsBomb && (GameState->GameMode == GameMode_End))
                 {
-                    Color = GameState->GameSettings.Colors.CellBomb;
+                    Color = GameState->Colors.CellBomb;
                     BitmapID = BitmapID_Light;
                 }
                 else if(CellToDraw->IsFlagged)
                 {
                     BitmapID = BitmapID_Flag;
-                    Color = GameState->GameSettings.Colors.CellFlagged;
+                    Color = GameState->Colors.CellFlagged;
                 }
 
                 PushRectangle(RenderGroup, CellRectangle, Color);
-                PushRectangleOutline(RenderGroup, CellRectangle, GameState->GameSettings.Colors.CellBorder);
+                PushRectangleOutline(RenderGroup, CellRectangle, GameState->Colors.CellBorder);
 
                 if(BitmapID != BitmapID_None)
                 {
@@ -990,13 +1028,13 @@ UPDATE_AND_RENDER(UpdateAndRender)
                     GetAlignmentForForCodePoint(GameState->Fonts[FontID_LibMono], NumberStringTable[CellToDraw->NeighboringBombCount][0], &AlignX, &AlignY);
                     v2 TextP = V2(CellRectangle.Min.x, CellRectangle.Max.y) + 0.5f*V2(GameState->CellSize, -GameState->CellSize) +
                         0.5f*V2(-(CellTextBounds.Max.x - CellTextBounds.Min.x), (CellTextBounds.Max.y - CellTextBounds.Min.y) - 6);
-                    PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextP+V2(1, 1), GameState->GameSettings.Colors.TextShadow, NumberStringTable[CellToDraw->NeighboringBombCount]);
-                    PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextP, GameState->GameSettings.Colors.TextCell, NumberStringTable[CellToDraw->NeighboringBombCount]);
+                    PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextP+V2(1, 1), GameState->Colors.TextShadow, NumberStringTable[CellToDraw->NeighboringBombCount]);
+                    PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TextP, GameState->Colors.TextCell, NumberStringTable[CellToDraw->NeighboringBombCount]);
                 }
 
                 if(CellToDraw->IsFlagged)
                 {
-                    PushRectangleOutline(RenderGroup, CellRectangle, GameState->GameSettings.Colors.CellFlagged, 0.15f*GameState->CellSize);
+                    PushRectangleOutline(RenderGroup, CellRectangle, GameState->Colors.CellFlagged, 0.15f*GameState->CellSize);
                 }
 
                 if(IsInRectangle(CellRectangle, V2(Input->MouseX, Input->MouseY)))
@@ -1016,20 +1054,20 @@ UPDATE_AND_RENDER(UpdateAndRender)
             f32 SecondsTaken = (f64)(GameState->GameCurrentMSCount - GameState->GameBeginMSCount) / 1000.0f;
             v2 TimerP = GameGridOffset + V2(0, -2);
             bitmap *ClockBitmap = GetBitmap(GameState, BitmapID_Clock);
-            PushBitmap(RenderGroup, ClockBitmap, TimerP - V2(0, ClockBitmap->Height), GameState->GameSettings.Colors.TextHUDTime);
+            PushBitmap(RenderGroup, ClockBitmap, TimerP - V2(0, ClockBitmap->Height), GameState->Colors.TextHUDTime);
             TimerP += V2(ClockBitmap->Width + 4, 0);
-            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TimerP, GameState->GameSettings.Colors.TextShadow, "%.02fs", SecondsTaken);
-            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TimerP-V2(1, 1), GameState->GameSettings.Colors.TextHUDTime, "%.02fs", SecondsTaken);
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TimerP, GameState->Colors.TextShadow, "%.02fs", SecondsTaken);
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], TimerP-V2(1, 1), GameState->Colors.TextHUDTime, "%.02fs", SecondsTaken);
 
             char FlagsCountTextBuffer[16] = {};
             snprintf(FlagsCountTextBuffer, ArrayCount(FlagsCountTextBuffer), "%d", GameState->FlagCount);
             rect2 FlagTextDims = GetTextBounds(GameState->Fonts[FontID_LibMono], FlagsCountTextBuffer);
             bitmap *FlagBitmap = GetBitmap(GameState, BitmapID_Flag);
             v2 FlagTextP = GameGridOffset + V2(0, -2) + V2(GameGridRect.Max.x, 0) - V2(FlagBitmap->Width, 0)/*- V2(FlagTextDims.Max.x - FlagTextDims.Min.x, 0)*/;
-            PushBitmap(RenderGroup, FlagBitmap, FlagTextP - V2(0, FlagBitmap->Height), GameState->GameSettings.Colors.TextHUDFlags);
+            PushBitmap(RenderGroup, FlagBitmap, FlagTextP - V2(0, FlagBitmap->Height), GameState->Colors.TextHUDFlags);
             FlagTextP -= V2(FlagTextDims.Max.x - FlagTextDims.Min.x, 0);
-            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], FlagTextP, GameState->GameSettings.Colors.TextShadow, FlagsCountTextBuffer);
-            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], FlagTextP-V2(1, 1), GameState->GameSettings.Colors.TextHUDFlags, FlagsCountTextBuffer);
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], FlagTextP, GameState->Colors.TextShadow, FlagsCountTextBuffer);
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], FlagTextP-V2(1, 1), GameState->Colors.TextHUDFlags, FlagsCountTextBuffer);
         }
 
         if((GameState->GameMode == GameMode_End) &&
@@ -1037,16 +1075,16 @@ UPDATE_AND_RENDER(UpdateAndRender)
         {
             v2 EndStateP = 0.5f*V2(DrawBuffer->Width, DrawBuffer->Height);
             char *EndStateText = 0;
-            v4 Color = GameState->GameSettings.Colors.None;
+            v4 Color = GameState->Colors.None;
             if(GameState->EndState == EndState_Win)
             {
                 EndStateText = "WIN";
-                Color = GameState->GameSettings.Colors.TextWin;
+                Color = GameState->Colors.TextWin;
             }
             else if(GameState->EndState == EndState_Lose)
             {
                 EndStateText = "GAME OVER";
-                Color = GameState->GameSettings.Colors.TextLose;
+                Color = GameState->Colors.TextLose;
             }
 
             rect2 EndStateTextRect = GetTextBounds(GameState->Fonts[FontID_LibMono], EndStateText);
@@ -1056,10 +1094,10 @@ UPDATE_AND_RENDER(UpdateAndRender)
             rect2 BannerRect = {};
             BannerRect.Min = V2(0, DrawBuffer->Height*0.5f - 14);
             BannerRect.Max = V2(DrawBuffer->Width, DrawBuffer->Height*0.5f + 14);
-            PushRectangle(RenderGroup, BannerRect, GameState->GameSettings.Colors.OverlayBackground); 
-            PushRectangleOutline(RenderGroup, BannerRect, GameState->GameSettings.Colors.OverlayBorder); 
+            PushRectangle(RenderGroup, BannerRect, GameState->Colors.OverlayBackground); 
+            PushRectangleOutline(RenderGroup, BannerRect, GameState->Colors.OverlayBorder); 
 
-            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], EndStateP, GameState->GameSettings.Colors.TextShadow, "%s", EndStateText);
+            PushText(RenderGroup, GameState->Fonts[FontID_LibMono], EndStateP, GameState->Colors.TextShadow, "%s", EndStateText);
             PushText(RenderGroup, GameState->Fonts[FontID_LibMono], EndStateP-V2(1, 1), Color, "%s", EndStateText);
         }
 

@@ -2,7 +2,6 @@
 
 struct cell
 {
-    // TODO(rick) Compact this stuff down to a single byte?
     u8 NeighboringBombCount;
     b8 IsRevealed;
     b8 IsFlagged;
@@ -15,18 +14,6 @@ struct transient_state
 
     b32 IsInitialized;
 };
-
-#pragma pack(push, 1)
-struct saved_score_data
-{
-    s32 Difficulty;
-    s32 GridSize;
-    f32 Time;
-    s32 Year;
-    s32 Month;
-    s32 Day;
-};
-#pragma pack(pop)
 
 enum game_mode
 {
@@ -171,19 +158,24 @@ union color_settings
     v4 Colors[ColorID_Count];
 };
 
-struct game_settings
-{
-    // TODO(rick): Move menu difficulty and grid size into here
-
-    color_settings Colors;
-};
-
 struct options_state
 {
     platform_file_enumeration_result *Themes;
     s32 HotItemIndex;
     b32 IsInitialized;
 };
+
+#pragma pack(push, 1)
+struct saved_score_data
+{
+    s32 Difficulty;
+    s32 GridSize;
+    f32 Time;
+    s32 Year;
+    s32 Month;
+    s32 Day;
+};
+#pragma pack(pop)
 
 struct scores_list
 {
@@ -233,7 +225,7 @@ struct game_state
 
     bitmap Bitmaps[BitmapID_Count];
 
-    game_settings GameSettings;
+    color_settings Colors;
     menu_state MainMenuState;
     options_state OptionsState;
     scores_state ScoresState;

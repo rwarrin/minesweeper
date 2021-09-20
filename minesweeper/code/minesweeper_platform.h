@@ -97,7 +97,7 @@ struct asset_file
     u32 MagicNumber;
 
     u32 BitmapCount;
-    u32 BitmapsOffset;
+    u32 BitmapsOffset; // NOTE(rick): Offset to an array of bitmap structs
 
     u32 FontCount;
     u32 FontsOffset; // NOTE(rick): Offset to an array of u32's
@@ -113,8 +113,6 @@ struct input
 {
     f32 dt;
 
-    // TODO(rick): Rename these into generic action/control names and let the
-    // platform decide how to assign HID inputs to actions and controls.
     s32 MouseX;
     s32 MouseY;
     s32 MouseZ;
@@ -199,6 +197,9 @@ typedef PLATFORM_ENUMERATE_FILES(platform_enumerate_files);
 #define PLATFORM_FREE_ENUMERATED_FILE_RESULT(name) void name(platform_file_enumeration_result *Data)
 typedef PLATFORM_FREE_ENUMERATED_FILE_RESULT(platform_free_enumerated_file_result);
 
+#define PLATFORM_RANDOM_NUMBER(name) u32 name(void)
+typedef PLATFORM_RANDOM_NUMBER(platform_random_number);
+
 struct platform_work_queue;
 #define PLATFORM_WORK_CALLBACK(name) void name(void *Data)
 typedef PLATFORM_WORK_CALLBACK(platform_work_callback);
@@ -218,6 +219,7 @@ struct platform_api
     platform_request_exit *RequestExit;
     platform_enumerate_files *EnumerateFiles;
     platform_free_enumerated_file_result *FreeEnumeratedFileResult;
+    platform_random_number *GenerateRandomNumber;
     platform_add_work_to_queue *AddWorkToQueue;
     platform_complete_all_work *CompleteAllWork;
 

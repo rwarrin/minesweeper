@@ -64,8 +64,6 @@ PushRectangle(render_group *RenderGroup, rect2 Rectangle, v4 Color)
 inline void
 PushRectangleOutline(render_group *RenderGroup, rect2 Rectangle, v4 Color, f32 Thickness = 1.0f)
 {
-    // TODO(rick): Remove the DrawRectangleOutline function and turn this into
-    // four PushRectangle calls that do the same math as the function.
     render_entry_rectangle_outline *Entry = PushRenderElement(RenderGroup, render_entry_rectangle_outline);
     if(Entry)
     {
@@ -178,7 +176,7 @@ TiledRenderGroupToOutput(render_group *RenderGroup, bitmap *DrawBuffer)
             Work->ClipRect = ClipRect;
 
 #if 1
-            PushRectangleOutline(RenderGroup, ClipRect, V4(1, 0, 1, 1), 1);
+            //PushRectangleOutline(RenderGroup, ClipRect, V4(1, 0, 1, 1), 1);
             Platform.AddWorkToQueue(Platform.WorkQueue, DoTiledRenderWork, Work);
 #else
             DoTiledRenderWork(Work);

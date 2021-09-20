@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <wincrypt.h>
 #include <intrin.h>
 #include <stdio.h>
 
@@ -235,7 +236,6 @@ PLATFORM_ENUMERATE_FILES(Win32EnumerateFiles)
                 CurrentBucket = NewBucket;
             }
 
-            // TODO(rick): Replace strlen
             CopyMemory(CurrentBucket->Items[CurrentBucket->Used++],
                        FindData.cFileName, strlen(FindData.cFileName));
         } while(FindNextFileA(FindFileHandle, &FindData));
@@ -252,6 +252,28 @@ PLATFORM_FREE_ENUMERATED_FILE_RESULT(Win32FreeEnumeratedFileResult)
         Data = Data->Next;
         VirtualFree(Data, 0, MEM_RELEASE);
     }
+}
+
+static
+PLATFORM_RANDOM_NUMBER(Win32GenerateRandomNumber)
+{
+    u32 Result = 0;
+
+    HCRYPTPROV CryptoServiceProvider = {};
+    BOOL GotCryptoProvider = CryptAcquireContextA(&CryptoServiceProvider, 0, 0, PROV_RSA_FULL, 0);
+    if(GotCryptoProvider)
+    {
+        u8 Buffer[4] = {0};
+        BOOL GotRandom = CryptGenRandom(CryptoServiceProvider, ArrayCount(Buffer), Buffer);
+        if(GotRandom)
+        {
+            Result = *(u32 *)Buffer;
+        }
+
+        CryptReleaseContext(CryptoServiceProvider, 0);
+    }
+
+    return(Result);
 }
 
 static void
@@ -520,6 +542,7 @@ WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
     AppMemory.PlatformAPI.RequestExit = RequestExit;
     AppMemory.PlatformAPI.EnumerateFiles = Win32EnumerateFiles;
     AppMemory.PlatformAPI.FreeEnumeratedFileResult = Win32FreeEnumeratedFileResult;
+    AppMemory.PlatformAPI.GenerateRandomNumber = Win32GenerateRandomNumber;
     AppMemory.PlatformAPI.AddWorkToQueue = Win32AddWorkToQueue;
     AppMemory.PlatformAPI.CompleteAllWork = Win32CompleteAllWorkQueueWork;
     AppMemory.PlatformAPI.WorkQueue = &WorkQueue;

@@ -78,7 +78,6 @@ ClearSIMD(bitmap *DrawBuffer, v4 ColorIn, rect2 ClipRect)
         u32 *Pixel = Row + MinX;
         for(u32 X = MinX; X < MaxX; X += 4)
         {
-            // TODO(rick): We're overwriting here
             *(__m128i *)Pixel = _Color;
             Pixel += 4;
         }
@@ -811,17 +810,16 @@ DrawText(render_group *RenderGroup, font_map *FontMap, f32 XIn, f32 YIn, char *S
 }
 
 static void
-PushText(render_group *RenderGroup, font_map *FontMap, v2 P, char *String, v4 Color)
+PushString(render_group *RenderGroup, font_map *FontMap, v2 P, char *String, v4 Color)
 {
     DrawText(RenderGroup, FontMap, P.x, P.y, String, Color);
 }
 
-// TODO(rick): Push strings onto the render group??
 #define PushText(RenderGroup, FontMap, P, Color, Format, ...) \
 { \
     char Buffer[256] = {}; \
     snprintf(Buffer, ArrayCount(Buffer), Format, __VA_ARGS__); \
-    PushText(RenderGroup, FontMap, P, Buffer, Color); \
+    PushString(RenderGroup, FontMap, P, Buffer, Color); \
 }
 
 static rect2
