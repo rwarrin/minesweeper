@@ -341,6 +341,10 @@ ProcessPendingMessages(input *Input)
                     {
                         Win32ProcessKeyboardInput(&Input->Keyboard_Return, IsDown);
                     }
+                    else if(KeyCode === VK_LEFT)
+                    {
+                        Win32ProcessKeyboardInput(&Input->Keyboard_ArrowLeft, IsDown);
+                    }
                 }
             } break;
             default:
