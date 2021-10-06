@@ -515,7 +515,7 @@ UPDATE_AND_RENDER(UpdateAndRender)
 
 
         PushClear(RenderGroup, GameState->Colors.None);
-
+        PushText(RenderGroup, GameState->Fonts[FontID_LibMono], V2(20, 40), V4(1, 1, 1, 1), "%3.0f fps (%02.02fms actual)", Platform.FPS, Platform.FrameTimeActual);
         v2 MouseAt = {(f32)Input->MouseX, (f32)Input->MouseY};
         v2 MenuTextAt = V2(DrawBuffer->Width, DrawBuffer->Height)*0.5f;
         for(u32 MenuIndex = 0; MenuIndex < Menu->ItemCount; ++MenuIndex)
