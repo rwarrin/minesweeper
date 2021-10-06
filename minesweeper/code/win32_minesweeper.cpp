@@ -622,23 +622,22 @@ WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
             Sleep(MSToSleep);
         }
 
-#if 1
-        {
-            LARGE_INTEGER FinalTime; QueryPerformanceCounter(&FinalTime);
-            f32 TotalMSElapsed = ((f32)(FinalTime.QuadPart - LastTime.QuadPart) / (f32)(CPUFrequency.QuadPart)) * 1000.0f;
-            f32 FPS = 1000.0f / TotalMSElapsed;
-            AppMemory.PlatformAPI.FPS = FPS;
-            AppMemory.PlatformAPI.FrameTimeActual = MSElapsed;
-            AppMemory.PlatformAPI.FrameTimeTotal = TotalMSElapsed;
-            AppMemory.PlatformAPI.FrameTimeSlept = MSToSleep > 0 ? MSToSleep : 0;
-            //DebugWriteLine("%02.2f FPS (%02.2f ms/f %0dms slept)\n", FPS, MSElapsed, MSToSleep > 0 ? MSToSleep : 0);
 
-            QueryPerformanceCounter(&LastTime);
-        }
-#else
-        LastTime = EndTime;
+        LARGE_INTEGER FinalTime; QueryPerformanceCounter(&FinalTime);
+        f32 TotalMSElapsed = ((f32)(FinalTime.QuadPart - LastTime.QuadPart) / (f32)(CPUFrequency.QuadPart)) * 1000.0f;
+        f32 FPS = 1000.0f / TotalMSElapsed;
+        AppMemory.PlatformAPI.FPS = FPS;
+        AppMemory.PlatformAPI.FrameTimeActual = MSElapsed;
+        AppMemory.PlatformAPI.FrameTimeTotal = TotalMSElapsed;
+        AppMemory.PlatformAPI.FrameTimeSlept = MSToSleep > 0 ? MSToSleep : 0;
+#if 0
+        DebugWriteLine("%02.2f FPS (%02.2f ms/f %0dms slept)\n", FPS, MSElapsed, MSToSleep > 0 ? MSToSleep : 0);
 #endif
-    }
+
+        QueryPerformanceCounter(&LastTime);
+
+        LastTime = EndTime;
+
 
     return(0);
 }
