@@ -95,6 +95,7 @@ struct asset_file
 {
 #define FILE_MAGIC_NUMBER MAGIC_NUMBER('m', 's', 'w', 'p')
     u32 MagicNumber;
+    u8 Version[4];
 
     u32 BitmapCount;
     u32 BitmapsOffset; // NOTE(rick): Offset to an array of bitmap structs
