@@ -137,7 +137,12 @@ struct input
         button_state Keyboard[5];
         struct
         {
-            button_state Keyboard_A;
+            union
+            {
+                button_state Keyboard_A;
+                button_state Keyboard_ArrowLeft;
+            };
+
             button_state Keyboard_D;
             button_state Keyboard_N;
             button_state Keyboard_S;
