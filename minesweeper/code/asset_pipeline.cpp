@@ -185,6 +185,9 @@ int main(void)
 
     asset_file AssetFileHeader = {};
     AssetFileHeader.MagicNumber = FILE_MAGIC_NUMBER;
+    AssetFileHeader.Version[0] = '1';  // NOTE: Major
+    AssetFileHeader.Version[1] = '0';  // NOTE: Minor
+    AssetFileHeader.Version[2] = '0';  // NOTE: Patch
     AssetFileHeader.BitmapCount = BitmapFileCount;
     AssetFileHeader.BitmapsOffset = sizeof(AssetFileHeader);
     AssetFileHeader.FontCount = FontFileCount;

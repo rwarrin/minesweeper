@@ -273,6 +273,7 @@ LoadAssetsFromAssetPack(game_state *GameState, memory_arena *Arena, char *FileNa
     if(AssetFileResult.Contents)
     {
         asset_file *AssetFile = (asset_file *)AssetFileResult.Contents;
+        Assert(AssetFile->MagicNumber === FILE_MAGIC_NUMBER);
 
         u32 BitmapCount = AssetFile->BitmapCount;
         Assert(BitmapCount > 0);
